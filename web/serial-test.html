@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Laser USB Test</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#4C1D95">
+  <link rel="stylesheet" href="/src/style.css">
+  <!-- Blocking on purpose: sets data-theme before the first paint. -->
+  <script src="/theme-boot.js"></script>
+</head>
+<body class="page">
+  <header class="pagehead"><h1><img src="/icon.svg" alt="" width="44" height="44" class="logo">Laser USB test (Phase 0)</h1><button id="theme" class="themebtn" type="button">🖥️ System</button></header>
+  <p class="muted">Replays a LightBurn-saved <code>.rd</code> file byte-for-byte to the Ruida over USB and logs anything the
+    controller sends back. Use cardboard and low power. Stay at the machine with the lid closed.</p>
+
+  <section class="card">
+    <h2>1. Connect</h2>
+    <div class="row">
+      <label>Baud <select id="baud"><option>115200</option><option>38400</option><option>19200</option></select></label>
+      <label>Flow control <select id="flow"><option value="hardware">hardware (RTS/CTS)</option><option value="none">none</option></select></label>
+      <label>Swizzle magic <input id="magic" value="0x88" size="5"></label>
+      <label><input type="checkbox" id="showAll"> show all ports</label>
+    </div>
+    <div class="row">
+      <button id="connect">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <span id="portInfo" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. Load a golden .rd file</h2>
+    <input type="file" id="file" accept=".rd">
+    <pre id="summary" class="muted"></pre>
+  </section>
+
+  <section class="card">
+    <h2>3. Send</h2>
+    <div class="row">
+      <button id="send" disabled>Send file</button>
+      <button id="stop" class="stop">STOP</button>
+      <progress id="progress" max="1" value="0"></progress>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Log <button id="copy" class="small">Copy log</button></h2>
+    <pre id="log" class="log"></pre>
+  </section>
+
+  <footer class="pagefoot"><span>Internal district tool.</span><span><a href="/">Student page</a> <a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a> <a href="https://uploadmymodel.com" target="_blank" rel="noopener">uploadmymodel</a> <a href="https://uploadmycut.com" target="_blank" rel="noopener">uploadmycut</a> <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a> <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a> <a href="/legal">Privacy &amp; legal</a> <a href="https://github.com/daltonjfowler/uploadmylaser" target="_blank" rel="noopener">Open source</a></span></footer>
+  <script type="module" src="/src/serial-test.ts"></script>
+</body>
+</html>

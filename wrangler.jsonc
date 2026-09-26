@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uploadmylaser",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-31",
+  // uploadmylaser.com is the real address; www redirects to it (src/headers.ts). The
+  // workers.dev URL stays on as a fallback.
+  "routes": [
+    { "pattern": "uploadmylaser.com", "custom_domain": true },
+    { "pattern": "www.uploadmylaser.com", "custom_domain": true }
+  ],
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS",
+    // Every response, static files included, goes through the Worker for https + security headers.
+    "run_worker_first": true,
+    "not_found_handling": "none"
+  },
+  "kv_namespaces": [
+    // This app's own namespace. Never reuse uploadmycode's.
+    { "binding": "CLASS_KV", "id": "812c0c759168406aa12bc0470b50e986" }
+  ],
+  "vars": {
+    "ALLOWED_CIDRS": ""
+  },
+  // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "containers": [
+    {
+      "class_name": "LaserContainer",
+      "image": "./container/Dockerfile",
+      "image_build_context": "./container",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROCESSOR", "class_name": "LaserContainer" },
+      // Rate limits + teacher-key guard. No container attached, on purpose (see src/worker.ts).
+      { "name": "COUNTERS", "class_name": "Counters" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["LaserContainer"] },
+    { "tag": "v2", "new_sqlite_classes": ["Counters"] }
+  ]
+}

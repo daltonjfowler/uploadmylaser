@@ -1,0 +1,37 @@
+{
+  "name": "uploadmylaser",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Kid-safe web sender for a Ruida laser, built for Chromebook classrooms.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:web": "vite web",
+    "build": "vite build web",
+    "deploy": "npm run build && wrangler deploy",
+    "types": "wrangler types",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
+    "test": "node --test \"test/*.test.mjs\" \"web/test/*.test.mjs\"",
+    "test:py": "cd container && python -m pytest -q",
+    "icons": "node scripts/make-icons.mjs web/public"
+  },
+  "devDependencies": {
+    "@fontsource/allerta-stencil": "^5.3.0",
+    "@fontsource/anton": "^5.3.0",
+    "@fontsource/bungee": "^5.3.0",
+    "@fontsource/pacifico": "^5.3.0",
+    "@fontsource/permanent-marker": "^5.3.0",
+    "@types/w3c-web-serial": "^1.0.8",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "wrangler": "4.127.1"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260828.1": true
+  }
+}

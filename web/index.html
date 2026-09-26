@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>uploadmylaser</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#4C1D95">
+  <link rel="stylesheet" href="/src/style.css">
+  <!-- Blocking on purpose: sets data-theme before the first paint. -->
+  <script src="/theme-boot.js"></script>
+</head>
+<body class="app">
+  <header class="titlebar">
+    <strong class="brand"><img src="/icon.svg" alt="" width="36" height="36">uploadmylaser</strong>
+    <button id="help" class="toplink" type="button" data-hint="Shortcuts and tips.">ⓘ Help</button>
+    <a class="toplink" href="/teacher/" data-hint="For teachers: presets, machine settings and the class phrase.">Teacher</a>
+    <span id="status" class="pill">Laser not connected</span>
+    <button id="theme" class="themebtn" type="button" data-hint="Switch between light and dark.">🖥️ System</button>
+    <button id="connect" class="primary" data-hint="Plug the laser's USB cable into this Chromebook first.">Connect laser</button>
+    <button id="stopTop" class="stop" hidden data-hint="Stops the laser right away. Esc does the same.">STOP</button>
+  </header>
+
+  <nav class="toolbar" aria-label="File and edit">
+    <button id="open" data-hint="Open: start over with this file. Clears the workspace.">📂 Open…</button>
+    <button id="import" data-hint="Import: add this file to what's already here, like a logo next to your name.">➕ Import…</button>
+    <span class="sep"></span>
+    <button id="undo" disabled data-hint="Undo the last change. (Ctrl+Z)">↶ Undo</button>
+    <button id="redo" disabled data-hint="Redo what you undid. (Ctrl+Y)">↷ Redo</button>
+    <span class="sep"></span>
+    <button id="selectAll" data-hint="Select every part, to move them together. (Ctrl+A) Shift+click adds or removes one part.">⬚ Select all</button>
+    <button id="rotate" data-hint="Turn the selected part a quarter turn.">⟳ Rotate</button>
+    <button id="delete" data-hint="Remove the selected part. (Delete key)">🗑 Delete</button>
+    <span class="sep"></span>
+    <button id="zoomOut" data-hint="Zoom out. (Mouse wheel works too)">−</button>
+    <button id="zoomIn" data-hint="Zoom in.">+</button>
+    <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
+    <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
+    <input type="file" id="openFile" accept=".svg,.dxf,image/svg+xml" hidden>
+    <input type="file" id="importFile" accept=".svg,.dxf,image/svg+xml" hidden>
+  </nav>
+
+  <div class="sizebar" id="sizebar">
+    <span id="selName" class="muted">Nothing selected. Click a part to select it.</span>
+    <span id="selControls" hidden>
+      <label id="xyBox" data-hint="Where the middle of the part sits. 0, 0 is the bed's top-right corner.">X <input id="selX" type="number" step="1"> Y <input id="selY" type="number" step="1"></label>
+      <label data-hint="Width. The height follows when 🔒 is on, so it keeps its shape. For several parts, this is the box around them all.">W <input id="selW" type="number" step="1" min="1"></label>
+      <label data-hint="Height.">H <input id="selH" type="number" step="1" min="1"></label>
+      <span class="unit u">mm</span>
+      <label id="lenField" hidden data-hint="How long the line is. Its first point stays put.">Length <input id="selLen" type="number" step="0.1" min="0.1"> <span class="u">mm</span></label>
+      <label id="angField" hidden data-hint="The line's angle: 0° points right, 90° points up. Its first point stays put.">Angle <input id="selAng" type="number" step="1"> °</label>
+      <button id="lock" class="lockbtn" type="button" aria-pressed="true" data-hint="Lock: corner squares and typed sizes keep the shape. Unlock to stretch from the corners too. Side squares always stretch one way. (Shift while dragging a corner flips it.)">🔒</button>
+      <span id="pctBox">
+        <label data-hint="Size as a percent of the original. Type 100 for the original size.">Scale <input id="selPct" type="number" step="1" min="1"></label>
+        <span id="pctY" hidden><label data-hint="Height as a percent of the original.">× <input id="selPctY" type="number" step="1" min="1"></label></span>
+        <span class="unit">%</span>
+      </span>
+      <span id="textControls" hidden>
+        <input id="textValue" maxlength="60" placeholder="Your name" data-hint="Type your text.">
+        <select id="textFont" data-hint="Pick a font. Stencil is best for Cut through."></select>
+        <label data-hint="How tall the capital letters are.">Letters <input id="textH" type="number" min="0.1" step="0.1"> <span class="u">mm</span></label>
+      </span>
+    </span>
+    <span id="fontTip" class="muted small"></span>
+    <label class="unitsel" data-hint="Units for sizes and the rulers.">Units <select id="units"><option value="mm">mm</option><option value="cm">cm</option><option value="in">in</option></select></label>
+  </div>
+
+  <main class="workarea">
+    <aside class="tools" aria-label="Tools">
+      <button id="toolSelect" class="tool on" data-hint="Select: click a part to pick it, drag to move it, drag the purple corner to resize.">➤<span>Select</span></button>
+      <button id="toolText" class="tool" data-hint="Text: add your name or a word. Uses the colour picked below.">T<span>Text</span></button>
+      <button id="toolBox" class="tool" data-hint="Box: add a rectangle. Uses the colour picked below.">▭<span>Box</span></button>
+      <button id="toolCircle" class="tool" data-hint="Circle: add a circle. Uses the colour picked below.">◯<span>Circle</span></button>
+      <button id="toolLine" class="tool" data-hint="Line: click two points, or drag. Shift keeps it straight or at 45°.">╱<span>Line</span></button>
+      <button id="toolCurve" class="tool" data-hint="Curve: click points to draw a smooth curve. Click the first point to close it.">∿<span>Curve</span></button>
+      <button id="toolShapes" class="tool" data-hint="Shapes: stars, hearts, sports balls, callouts and more.">★<span>Shapes</span></button>
+      <button id="toolPattern" class="tool" data-hint="Pattern: make copies of the selected part in rows and columns.">▦<span>Pattern</span></button>
+    </aside>
+
+    <section class="stage">
+      <canvas id="ws" aria-label="Laser bed"></canvas>
+      <div id="toast" class="toast" role="alert" hidden></div>
+      <div id="dimBox" class="dimbox" hidden>
+        <label><span id="dimLabel">Width</span> <input id="dimEdit" type="text" inputmode="decimal" autocomplete="off"> <span class="u">mm</span></label>
+        <span class="small"><kbd>Enter</kbd> sets it · <kbd>Esc</kbd> cancels</span>
+      </div>
+      <div id="lenBox" class="lenbox" hidden>
+        <label>Length <input id="lenInput" type="text" inputmode="decimal" autocomplete="off"> <span id="lenUnit">mm</span></label>
+        <label>Angle <input id="angInput" type="text" inputmode="decimal" autocomplete="off"> °</label>
+        <span class="small"><kbd>Tab</kbd> switches · <kbd>Enter</kbd> places it · 0° right, 90° up · blank angle = toward the pointer</span>
+      </div>
+      <div class="palette">
+        <div id="palette" class="palrow" role="radiogroup" aria-label="Colour"></div>
+        <div id="matChips" class="matchips" role="radiogroup" aria-label="Material"></div>
+      </div>
+    </section>
+
+    <aside class="panels">
+      <section class="panel">
+        <h2>Layers</h2>
+        <div class="matlabel block">Material</div>
+        <div id="materialList" class="matlist" role="radiogroup" aria-label="Material"></div>
+        <p class="muted small">Runs top to bottom. Cut through is always last.</p>
+        <ol id="layers" class="layers"></ol>
+        <div id="colors" class="colors" hidden>
+          <h3>What should these colours do?</h3>
+          <div id="colorList"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Laser</h2>
+        <p class="small muted">Start from: <b>laser head</b> · Job origin: <b>top-right</b></p>
+        <button id="phraseBtn" class="wide" data-hint="Your teacher gives you today's phrase. It lets the laser processor check your design.">🔑 Enter class phrase</button>
+        <ol id="steps" class="steps"></ol>
+        <p id="estimate" class="small"></p>
+        <ul id="messages" class="messages"></ul>
+        <button id="frame" class="wide" disabled data-hint="Traces a box around your design with the laser OFF, so you can check it fits your material.">Frame (laser off)</button>
+        <label class="ack"><input type="checkbox" id="ack"> The lid is closed and I will stay with the laser the whole time.</label>
+        <label class="panelname" id="panelNameRow" hidden data-hint="The name your job gets in the laser's file list. Up to 8 letters or numbers.">Name on the laser <input id="panelName" maxlength="8" autocomplete="off" spellcheck="false"></label>
+        <button id="send" class="go wide" disabled data-hint="Sends your design to the laser.">Send to laser</button>
+        <progress id="progress" max="1" value="0" hidden></progress>
+        <button id="stop" class="stop wide" hidden>STOP</button>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="hint"><span id="hint"></span><span class="credit">Internal district tool. <a href="/teacher/">Teacher</a> <a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a> <a href="https://uploadmymodel.com" target="_blank" rel="noopener">uploadmymodel</a> <a href="https://uploadmycut.com" target="_blank" rel="noopener">uploadmycut</a> <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a> <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a> <a href="/legal">Privacy &amp; legal</a> <a href="https://github.com/daltonjfowler/uploadmylaser" target="_blank" rel="noopener">Open source</a></span></footer>
+
+  <div id="libraryDlg" class="gate" hidden>
+    <div class="card wide">
+      <div class="dlghead"><h2>Shapes</h2><button type="button" id="libClose">Close</button></div>
+      <p class="muted small">Click one to add it, 40 mm across, in the colour picked at the bottom. Resize it with the white squares.</p>
+      <div id="libGrid"></div>
+    </div>
+  </div>
+
+  <div id="helpDlg" class="gate" hidden>
+    <div class="card wide help">
+      <div class="dlghead"><h2>Shortcuts and tips</h2><button type="button" id="helpClose">Close</button></div>
+      <div class="helpcols">
+        <section>
+          <h3>Keyboard</h3>
+          <table>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select everything</td></tr>
+            <tr><td><kbd>Shift</kbd>+click</td><td>Add or remove a part from the selection</td></tr>
+            <tr><td><kbd>Delete</kbd></td><td>Remove the selected parts</td></tr>
+            <tr><td>Arrow keys</td><td>Nudge 1 mm (<kbd>Shift</kbd>: 10 mm)</td></tr>
+            <tr><td>Double-click, <kbd>Enter</kbd> or <kbd>Esc</kbd></td><td>Finish a line or curve (keeps what you drew)</td></tr>
+            <tr><td>Type a number while drawing</td><td>Exact length for the next point, e.g. <b>50</b>. Press <kbd>Tab</kbd> to type the angle too (0 = right, 90 = up), then <kbd>Enter</kbd>.</td></tr>
+            <tr><td><kbd>Tab</kbd> while drawing</td><td>Type just an angle; the length is where the pointer is</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td><b>Stops the laser</b> when it's connected. Also finishes drawing, closes a window, or unselects.</td></tr>
+          </table>
+          <h3>Mouse and touch</h3>
+          <table>
+            <tr><td>Scroll wheel / pinch</td><td>Zoom</td></tr>
+            <tr><td>Drag empty space</td><td>Move around the bed</td></tr>
+            <tr><td>White squares</td><td>Resize. Corners keep the shape when 🔒 is on; sides stretch one way.</td></tr>
+            <tr><td>Size labels (↔ ↕ ⌀)</td><td>Click one and type a new size. Circles show their diameter, lines their length.</td></tr>
+            <tr><td>Purple round grip</td><td>Move the selected part(s)</td></tr>
+            <tr><td><kbd>Shift</kbd> while dragging a corner</td><td>Flip the lock for that drag</td></tr>
+            <tr><td><kbd>Shift</kbd> while drawing a line</td><td>Straight or 45° lines</td></tr>
+          </table>
+        </section>
+        <section>
+          <h3>Tips</h3>
+          <ul>
+            <li><b>Black</b> cuts through, <b style="color:#dc2626">red</b> marks a line, <b style="color:#2563eb">blue</b> engraves (fills). The laser always runs Engrave, then Mark, then Cut through.</li>
+            <li>The green dot is the <b>top-right corner</b> of your design. Move the laser head there on the machine.</li>
+            <li>Always <b>Frame</b> first: the laser traces the outline with the beam off, so you can check it fits your material.</li>
+            <li><b>Open</b> starts over with a file. <b>Import</b> adds a file next to what's there.</li>
+            <li>Text inside an SVG must be converted to paths first, or use the Text tool.</li>
+            <li>Cutting out letters? Use the <b>Stencil</b> font so O, A and B keep their middles.</li>
+            <li>Type a size, or a <b>Scale %</b> (100 = original size). Switch between <b>mm, cm and inches</b> at the right of the size bar.</li>
+            <li>Change the material from the panel on the right or the buttons at the bottom.</li>
+            <li>Click a colour (bottom bar or the Layers list) to change the selected parts to it.</li>
+            <li><b>Pattern</b> makes rows and columns of copies, like a sheet of keychains.</li>
+            <li>Your design is saved on this Chromebook, so a reload won't lose it.</li>
+            <li>Stay with the laser the whole time, and know where the red emergency stop is. This site is not a safety system: your teacher checks every job and watches the laser.</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="patternDlg" class="gate" hidden>
+    <form id="patternForm" class="card">
+      <h2>Pattern</h2>
+      <p class="muted small">Makes copies of the selected part in rows and columns.</p>
+      <div class="row">
+        <label>Columns <input id="patCols" type="number" min="1" max="20" value="3"></label>
+        <label>Rows <input id="patRows" type="number" min="1" max="20" value="1"></label>
+      </div>
+      <div class="row">
+        <label>Space between: <input id="patGapX" type="number" step="any" value="5"> <span class="u">mm</span> across</label>
+        <label><input id="patGapY" type="number" step="any" value="5"> <span class="u">mm</span> down</label>
+      </div>
+      <p id="patInfo" class="small muted"></p>
+      <div class="row"><button class="go">Make copies</button> <button type="button" id="patCancel">Cancel</button></div>
+    </form>
+  </div>
+
+  <div id="gate" class="gate" hidden>
+    <form id="gateForm" class="card">
+      <h2>Class phrase</h2>
+      <p class="muted">Your design goes to the school's laser processor to be previewed and sent.
+        Ask your teacher for today's phrase.</p>
+      <input id="phrase" autocomplete="off">
+      <div class="row"><button class="go">Go</button> <button type="button" id="gateLater">Not now</button></div>
+      <p id="gateErr" class="err"></p>
+    </form>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

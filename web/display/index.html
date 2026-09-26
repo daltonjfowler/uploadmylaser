@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>uploadmylaser - phrase</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/src/style.css">
+  <script src="/theme-boot.js"></script>
+  <!-- The projector window. The teacher page's Pop out opens it; it shows today's phrase and nothing
+       else, as large as the window allows. It reads the key the teacher page remembered. -->
+</head>
+<body class="display" data-state="start">
+  <main>
+    <p id="phrase"></p>
+    <p id="sub"></p>
+  </main>
+  <p id="net"></p>
+  <script type="module" src="/src/display.ts"></script>
+</body>
+</html>

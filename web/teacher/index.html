@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>uploadmylaser - teacher</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#4C1D95">
+  <link rel="stylesheet" href="/src/style.css">
+  <!-- Blocking on purpose: sets data-theme before the first paint. -->
+  <script src="/theme-boot.js"></script>
+</head>
+<body class="page teacher">
+  <header class="pagehead"><h1><img src="/icon.svg" alt="" width="44" height="44" class="logo">uploadmylaser - teacher</h1><button id="theme" class="themebtn" type="button">🖥️ System</button></header>
+  <p class="sub">Set the class phrase. Students type it once per tab; nobody can check a design or send it to the laser without it.</p>
+
+  <h2 class="cap">Teacher key</h2>
+  <div class="trow">
+    <div>
+      <label for="key" class="block">Kept in this browser only</label>
+      <input id="key" type="password" autocomplete="off" placeholder="teacher key">
+    </div>
+    <div class="fixed"><button id="remember" type="button">Remember on this machine</button></div>
+    <div class="fixed"><button id="forget" type="button" class="linkbtn">Forget key on this device</button></div>
+  </div>
+
+  <h2 class="cap">Today's phrase</h2>
+  <div class="trow">
+    <div>
+      <label for="phrase" class="block">Phrase</label>
+      <input id="phrase" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="blue-robot-pancake">
+    </div>
+    <div class="fixed"><button id="generate" type="button">Generate</button></div>
+    <div>
+      <label for="duration" class="block">Lasts for</label>
+      <select id="duration">
+        <option value="90">1 period (90 minutes)</option>
+        <option value="240">Half day (4 hours)</option>
+        <option value="480">Full day (8 hours)</option>
+        <option value="15">15 minutes (testing)</option>
+      </select>
+    </div>
+    <div class="fixed"><button id="set" class="primary" type="button">Set phrase</button></div>
+  </div>
+
+  <div class="phrasebox" id="display" data-live="no">
+    <p id="phraseNow">no phrase set</p>
+    <p id="countdown">Students cannot use the laser right now.</p>
+  </div>
+
+  <div class="trow buttons">
+    <div class="fixed"><button id="refresh" type="button">Refresh</button></div>
+    <div class="fixed"><button id="end" type="button">End now</button></div>
+    <div class="fixed"><button id="popout" type="button">Pop out</button></div>
+    <div class="fixed"><button id="warmup" type="button">Warm up the laser processor</button></div>
+  </div>
+
+  <p id="message" data-tone="plain"></p>
+
+  <p class="note">Project this page, or just write the phrase on the board. <strong>Pop out</strong> opens a small
+    window holding nothing but the phrase; drag that one onto the projector screen and click it to fill the screen.
+    After setting it, click <strong>Warm up the laser processor</strong> so the first student does not wait for a
+    cold start.</p>
+
+  <div id="panel" hidden>
+    <h2 class="cap">Materials</h2>
+    <p class="note">Test every setting on scrap first. Power is capped at the machine's "absolute max power".
+      Students only see the name. Never add PVC, vinyl, polycarbonate, ABS, or coated materials.</p>
+    <div id="materials"></div>
+    <div class="row">
+      <button id="addMat" class="small">+ Add material</button>
+      <button id="saveMats" class="go">Save materials</button>
+      <span id="matMsg" class="small"></span>
+    </div>
+
+    <h2 class="cap">Machine</h2>
+    <div id="machine" class="grid2"></div>
+    <div class="row"><button id="saveMachine">Save machine</button> <span id="machMsg" class="small"></span></div>
+  </div>
+
+  <footer class="pagefoot"><span><a href="/">Back to the laser page</a></span><span><a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a> <a href="https://uploadmymodel.com" target="_blank" rel="noopener">uploadmymodel</a> <a href="https://uploadmycut.com" target="_blank" rel="noopener">uploadmycut</a> <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a> <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a> <a href="/legal">Privacy &amp; legal</a> <a href="https://github.com/daltonjfowler/uploadmylaser" target="_blank" rel="noopener">Open source</a></span></footer>
+  <script type="module" src="/src/teacher.ts"></script>
+</body>
+</html>
