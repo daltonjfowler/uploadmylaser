@@ -12,9 +12,10 @@
   <link rel="stylesheet" href="/src/style.css">
   <!-- Blocking on purpose: sets data-theme before the first paint. -->
   <script src="/theme-boot.js"></script>
+  <script src="/logo-alive.js" defer></script>
 </head>
 <body class="page">
-  <header class="pagehead"><h1><img src="/icon.svg" alt="" width="44" height="44" class="logo">Laser USB test (Phase 0)</h1><button id="theme" class="themebtn" type="button">🖥️ System</button></header>
+  <header class="pagehead"><h1><img src="/icon.svg" data-logo alt="" width="44" height="44" class="logo">Laser USB test (Phase 0)</h1><button id="theme" class="themebtn" type="button">🖥️ System</button></header>
   <p class="muted">Replays a LightBurn-saved <code>.rd</code> file byte-for-byte to the Ruida over USB and logs anything the
     controller sends back. Use cardboard and low power. Stay at the machine with the lid closed.</p>
 

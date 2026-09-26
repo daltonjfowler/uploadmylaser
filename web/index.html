@@ -12,10 +12,11 @@
   <link rel="stylesheet" href="/src/style.css">
   <!-- Blocking on purpose: sets data-theme before the first paint. -->
   <script src="/theme-boot.js"></script>
+  <script src="/logo-alive.js" defer></script>
 </head>
 <body class="app">
   <header class="titlebar">
-    <strong class="brand"><img src="/icon.svg" alt="" width="36" height="36">uploadmylaser</strong>
+    <strong class="brand"><img src="/icon.svg" data-logo alt="" width="36" height="36">uploadmylaser</strong>
     <button id="help" class="toplink" type="button" data-hint="Shortcuts and tips.">ⓘ Help</button>
     <a class="toplink" href="/teacher/" data-hint="For teachers: presets, machine settings and the class phrase.">Teacher</a>
     <span id="status" class="pill">Laser not connected</span>
