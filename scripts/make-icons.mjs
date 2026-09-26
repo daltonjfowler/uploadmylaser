@@ -1,130 +1,28 @@
-// Draws the uploadmylaser icon: uploadmycode's friendly face and upload-arrow hat, with laser eyes
-// burning a plank. Writes icon.svg and the PNGs from the same shapes, so they never drift apart.
-// No dependencies: shapes are sampled per pixel with 4x4 supersampling, PNG written with zlib.
-// Usage: node scripts/make-icons.mjs web/public
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { deflateSync } from 'node:zlib';
+// Draws the uploadmylaser icon: the family robot face and upload-arrow hat, with laser eyes burning
+// a plank. The look (ink outline, hand-drawn wobble) lives in scripts/icon-kit.mjs, shared by all
+// four sites. Usage: node scripts/make-icons.mjs web/public
+import { circle, curve, inked, poly, rrect, tile, writeIcons } from './icon-kit.mjs';
 
 const OUT = process.argv[2] || '.';
-// Family look shared with uploadmycode and uploadmymodel: a grey robot face on a deep tile of the site's
-// colour, wearing an upload arrow in a brighter tint of that colour. uploadmylaser's colour is purple.
-const BG = '#4C1D95', FACE = '#AEB6C0', ARROW = '#A78BFA';
+// Family colours: grey face, deep tile of the site's colour, arrow in a brighter tint of it.
+const BG = '#4C1D95', FACE = '#AEB6C0', ARROW = '#A78BFA', INK = '#1A0B3B';
 const WHITE = '#FFFFFF', DARK = '#0F3D40', RED = '#FF3B3B', GLOW = '#FFB3B3', WOOD = '#E9C58F', GRAIN = '#D4A86A', SPARK = '#FFD166';
+const star = (cx, cy) => poly([[cx, cy - 3.5], [cx + 1.2, cy - 1], [cx + 4, cy], [cx + 1.2, cy + 1], [cx, cy + 3.5], [cx - 1.2, cy + 1], [cx - 4, cy], [cx - 1.2, cy - 1]], SPARK);
 
-// Each shape: an SVG element and an inside(x, y) test, in the 64-unit space.
-const rrect = (x, y, w, h, r, fill) => ({
-  svg: `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}"/>`,
-  fill,
-  inside: (px, py) => {
-    if (px < x || py < y || px > x + w || py > y + h) return false;
-    const cx = Math.min(Math.max(px, x + r), x + w - r), cy = Math.min(Math.max(py, y + r), y + h - r);
-    return (px - cx) ** 2 + (py - cy) ** 2 <= r * r;
-  },
-});
-const circle = (cx, cy, r, fill) => ({
-  svg: `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`,
-  fill,
-  inside: (px, py) => (px - cx) ** 2 + (py - cy) ** 2 <= r * r,
-});
-const poly = (pts, fill) => ({
-  svg: `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="${fill}"/>`,
-  fill,
-  inside: (px, py) => { // even-odd ray cast
-    let c = false;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const [xi, yi] = pts[i], [xj, yj] = pts[j];
-      if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) c = !c;
-    }
-    return c;
-  },
-});
-// A thick quadratic curve with round caps (the smile).
-const curve = (x0, y0, qx, qy, x1, y1, width, stroke) => {
-  const pts = Array.from({ length: 33 }, (_, i) => { const t = i / 32; return [(1 - t) ** 2 * x0 + 2 * (1 - t) * t * qx + t * t * x1, (1 - t) ** 2 * y0 + 2 * (1 - t) * t * qy + t * t * y1]; });
-  const r2 = (width / 2) ** 2;
-  return {
-    svg: `<path d="M${x0} ${y0} Q${qx} ${qy} ${x1} ${y1}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round"/>`,
-    fill: stroke,
-    inside: (px, py) => pts.some(([ax, ay], i) => {
-      if (i === pts.length - 1) return false;
-      const [bx, by] = pts[i + 1], dx = bx - ax, dy = by - ay;
-      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
-      return (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2 <= r2;
-    }),
-  };
-};
-// A laser beam from an eye to a point on the plank, `w` wide.
-const beam = (x0, y0, x1, y1, w, fill) => {
-  const len = Math.hypot(x1 - x0, y1 - y0), nx = (-(y1 - y0) / len) * (w / 2), ny = ((x1 - x0) / len) * (w / 2);
-  return poly([[x0 + nx, y0 + ny], [x1 + nx, y1 + ny], [x1 - nx, y1 - ny], [x0 - nx, y0 - ny]].map((p) => p.map((v) => +v.toFixed(2))), fill);
-};
-
-const shapes = [
-  rrect(0, 0, 64, 64, 14, BG),
-  // upload arrow (hat), same as uploadmycode
-  poly([[32, 5], [23, 15], [41, 15]], ARROW),
-  rrect(29, 14, 6, 7, 0, ARROW),
-  // the plank being lasered
-  rrect(7, 51, 50, 8, 2, WOOD),
-  rrect(10, 54, 16, 1, 0.5, GRAIN),
-  rrect(36, 56, 17, 1, 0.5, GRAIN),
-  // face
-  rrect(14, 20, 36, 25, 7, FACE),
+writeIcons(OUT, [
+  tile(BG),
+  ...inked([poly([[32, 5], [23, 15], [41, 15]], ARROW), rrect(29, 14, 6, 7, 0, ARROW)], INK),
+  // the plank being lasered, a little crooked like a real offcut
+  ...inked([poly([[7, 52.2], [57, 50.6], [57.2, 58.6], [7.2, 60]], WOOD)], INK),
+  curve(10, 55.6, 18, 55.2, 26, 55.4, 1, GRAIN), curve(36, 57, 44, 56.6, 53, 56.2, 1, GRAIN),
+  ...inked([rrect(14, 20, 36, 25, 7, FACE)], INK),
   curve(27, 38, 32, 42.5, 37, 38, 2.6, DARK),
-  // laser beams (under the eyes so they come out of the pupils), glowing core on top
-  beam(25, 30, 17, 54, 3.2, GLOW), beam(39, 30, 47, 54, 3.2, GLOW),
-  beam(25, 30, 17, 54, 1.6, RED), beam(39, 30, 47, 54, 1.6, RED),
+  // laser beams from the pupils to the plank: glow, then a hot core
+  curve(25, 30, 20, 42, 17, 53.5, 3.2, GLOW), curve(39, 30, 44, 42, 47, 53, 3.2, GLOW),
+  curve(25, 30, 20, 42, 17, 53.5, 1.5, RED), curve(39, 30, 44, 42, 47, 53, 1.5, RED),
   circle(25, 30, 3.6, DARK), circle(39, 30, 3.6, DARK),
   circle(25, 30, 1.7, RED), circle(39, 30, 1.7, RED),
-  circle(26, 28.8, 0.8, WHITE), circle(40, 28.8, 0.8, WHITE), // eye shine
+  circle(26, 28.8, 0.8, WHITE), circle(40, 28.8, 0.8, WHITE),
   // sparks where the beams hit
-  poly([[17, 50.5], [18.2, 53], [21, 54], [18.2, 55], [17, 57.5], [15.8, 55], [13, 54], [15.8, 53]], SPARK),
-  poly([[47, 50.5], [48.2, 53], [51, 54], [48.2, 55], [47, 57.5], [45.8, 55], [43, 54], [45.8, 53]], SPARK),
-];
-
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- uploadmylaser icon: uploadmycode's face with laser eyes. Generated by scripts/make-icons.mjs, edit it there. -->
-  ${shapes.map((s) => s.svg).join('\n  ')}
-</svg>
-`;
-writeFileSync(join(OUT, 'icon.svg'), svg);
-
-const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-
-function render(size) {
-  const px = Buffer.alloc(size * size * 4), SS = 4, scale = 64 / size;
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    let r = 0, g = 0, b = 0, a = 0;
-    for (let sy = 0; sy < SS; sy++) for (let sx = 0; sx < SS; sx++) {
-      const ux = (x + (sx + 0.5) / SS) * scale, uy = (y + (sy + 0.5) / SS) * scale;
-      let col = null;
-      for (const s of shapes) if (s.inside(ux, uy)) col = s.fill;
-      if (col) { const [cr, cg, cb] = hex(col); r += cr; g += cg; b += cb; a += 255; }
-    }
-    const n = SS * SS, o = (y * size + x) * 4, cov = a / 255;
-    px[o] = cov ? r / cov : 0; px[o + 1] = cov ? g / cov : 0; px[o + 2] = cov ? b / cov : 0; px[o + 3] = a / n;
-  }
-  return png(size, px);
-}
-
-function png(size, rgba) {
-  const raw = Buffer.alloc((size * 4 + 1) * size);
-  for (let y = 0; y < size; y++) rgba.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
-  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
-    return Buffer.concat([len, td, c]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
-}
-
-for (const [name, size] of [['favicon-32.png', 32], ['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512]]) {
-  writeFileSync(join(OUT, name), render(size));
-}
-console.log('icons written to', OUT);
+  ...inked([star(17, 53.5), star(47, 53)], INK, 0.8),
+], 'uploadmylaser icon: the family robot with laser eyes burning a plank.');
