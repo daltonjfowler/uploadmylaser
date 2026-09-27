@@ -12,7 +12,7 @@
   .spark { animation: twinkle 0.6s ease-in-out infinite; }
   @keyframes twinkle { 0%, 100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.4) rotate(25deg); } }
   </style>
-  <defs><filter id="wobble" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="1" seed="7"/><feDisplacementMap in="SourceGraphic" scale="0.9" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
+  <defs><filter id="wobble" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.07" numOctaves="1" seed="7"/><feDisplacementMap in="SourceGraphic" scale="1.6" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
   <rect x="0" y="0" width="64" height="64" rx="14" fill="#4C1D95"/>
   <g filter="url(#wobble)">
   <polygon points="32,5 23,15 41,15" fill="#1A0B3B" stroke="#1A0B3B" stroke-width="2.5" stroke-linejoin="round"/>
