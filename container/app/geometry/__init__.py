@@ -27,6 +27,29 @@ class Item:
     group: Optional[int] = None
 
 
+# Points in one whole job. Importers count as they go (PointBudget), so a hostile file fails fast
+# instead of building millions of points first.
+MAX_POINTS = 300_000
+TOO_DETAILED = "This design is too detailed. Simplify it and try again."
+
+
+class TooDetailed(ValueError):
+    def __init__(self) -> None:
+        super().__init__(TOO_DETAILED)
+
+
+class PointBudget:
+    """Running point count shared by every part of one job."""
+
+    def __init__(self, limit: int = MAX_POINTS) -> None:
+        self.left = limit
+
+    def take(self, n: int = 1) -> None:
+        self.left -= n
+        if self.left < 0:
+            raise TooDetailed()
+
+
 class ImportWarnings(list):
     def add(self, msg: str) -> None:
         if msg not in self:

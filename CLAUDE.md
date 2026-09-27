@@ -8,7 +8,9 @@ anything not marked verified there as a guess.
   camelCase aliases). Change both together.**
 - `src/worker.ts`: Worker: KV presets, phrase gate, teacher key, forwards to `LaserContainer`.
 - `container/app/`: FastAPI. `geometry/` (svg/dxf/text import, placement, hatch, ordering),
-  `ruida/` (swizzle, encoder, decoder), `pipeline.py` wires it together.
+  `ruida/` (swizzle, encoder, decoder), `pipeline.py` wires it together. `runner.py` runs each job in a
+  worker process that is killed after 25 s, and importers share a point budget (`PointBudget`), because one
+  container serves the whole school.
 - `web/`: Vite multi-page (index, teacher/, display/). `serial-test.html` is dev-only and must stay
   OUT of the production build (it sends raw bytes to the laser). No framework. Keep the bundle small, since
   Chromebooks are slow. `workspace.ts` is the canvas, `main.ts` the app state, `shapes.ts` draws Box/Circle as SVG.

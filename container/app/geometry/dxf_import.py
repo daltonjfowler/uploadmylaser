@@ -2,17 +2,49 @@
 from __future__ import annotations
 
 import io
+import math
+from collections.abc import Iterable, Iterator
 
 from ezdxf import disassemble, recover
+from ezdxf.entities import DXFEntity, Insert
+from ezdxf.math import BoundingBox
+from ezdxf.protocols import SupportsVirtualEntities, virtual_entities
 
-from . import ImportWarnings, Item, Pt
+from . import ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .colors import classify_dxf
 
 # $INSUNITS → mm. Unitless (0) is treated as mm, and the student confirms size in the preview.
 UNIT_MM = {0: 1.0, 1: 25.4, 2: 304.8, 4: 1.0, 5: 10.0, 6: 1000.0, 8: 0.0000254, 9: 0.0254}
+# Entities made by expanding block references. Blocks can nest and MINSERT repeats them in a grid, so a
+# small file can ask for billions of copies. Real laser drawings need far fewer.
+MAX_BLOCK_ENTITIES = 10_000
+# A curve bigger than 5 m (and so off any bed) is flattened relative to its size instead of in 0.05 mm
+# steps, so a huge-radius circle cannot turn into millions of points.
+RELATIVE_TOLERANCE = 1e-5
 
 
-def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05) -> list[Item]:
+def _decompose(entities: Iterable[DXFEntity], made: list[int], nested: bool = False) -> Iterator[DXFEntity]:
+    """ezdxf's recursive_decompose, counting every entity a block reference expands into. Plain entities
+    in the drawing itself are already limited by the upload size and the point budget."""
+    for entity in entities:
+        if nested:
+            made[0] += 1
+            if made[0] > MAX_BLOCK_ENTITIES:
+                raise TooDetailed()
+        if isinstance(entity, Insert):
+            if entity.mcount > 1:
+                yield from _decompose(entity.multi_insert(), made, True)
+            else:
+                yield from entity.attribs
+                yield from _decompose(virtual_entities(entity), made, True)
+        elif isinstance(entity, SupportsVirtualEntities):
+            yield from _decompose(virtual_entities(entity), made, True)
+        else:
+            yield entity
+
+
+def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budget: PointBudget | None = None) -> list[Item]:
+    budget = budget or PointBudget()
     doc, auditor = recover.read(io.BytesIO(data))
     if auditor.has_errors:
         warnings.add("The DXF had errors. We fixed what we could, so check the preview carefully.")
@@ -27,16 +59,21 @@ def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05) -> l
     msp = doc.modelspace()
     items: list[Item] = []
     raw: list[tuple[str, int, list[Pt], bool]] = []
-    for prim in disassemble.to_primitives(disassemble.recursive_decompose(msp)):
+    for prim in disassemble.to_primitives(_decompose(msp, [0])):
         ent = prim.entity
         if ent is None or ent.dxftype() in ("TEXT", "MTEXT", "HATCH", "DIMENSION", "POINT"):
             if ent is not None and ent.dxftype() in ("TEXT", "MTEXT"):
                 warnings.add("Text in the DXF was skipped. Explode it to lines first, or use the Text tool.")
             continue
         if prim.path is not None:
-            vs = list(prim.path.flattening(distance=tol_mm / scale))
+            box = BoundingBox(prim.path.control_vertices())
+            size = max(box.size.x, box.size.y) if box.has_data else 0.0
+            if not math.isfinite(size):
+                raise ValueError("DXF coordinates are not finite")
+            vs = list(prim.path.flattening(distance=max(tol_mm / scale, size * RELATIVE_TOLERANCE)))
         else:
             vs = list(prim.vertices())
+        budget.take(len(vs))
         if len(vs) < 2:
             continue
         pts = [(v.x * scale, v.y * scale) for v in vs]

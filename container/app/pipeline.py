@@ -5,7 +5,7 @@ import base64
 import binascii
 import math
 
-from .geometry import ImportWarnings, Item, Pt
+from .geometry import MAX_POINTS, TOO_DETAILED, ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .geometry.hatch import hatch
 from .geometry.order import nearest_neighbour, order_cuts
 from .geometry.transform import bbox, place
@@ -13,17 +13,18 @@ from .models import ContainerJob, OpKind, OpSettings, Part, PreviewLayer, Proces
 from .ruida.encoder import EncLayer, clamp_settings, encode_job, frame_layers, machine_converter
 
 LAYER_ORDER: tuple[OpKind, ...] = ("engrave", "score", "cut")
-MAX_POINTS = 300_000
 DEFAULT_HATCH_MM = 0.1
 VERB = {"cut": "cut through", "score": "marked", "engrave": "engraved"}
 
 
-def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings) -> list[Item]:
+def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings, budget: PointBudget) -> list[Item]:
     """One part's Items in its own coordinates. Raises ValueError with a friendly message. `n` is 1-based."""
     if part.kind == "text":
         from .geometry.text_import import import_text
         try:
-            return import_text(part.text, warnings)
+            return import_text(part.text, warnings, budget=budget)
+        except TooDetailed:
+            raise
         except Exception as e:  # noqa: BLE001
             raise ValueError(f"We couldn't make the text in \"part {n}\". Try different words.") from e
     if part.file_index >= len(job.files_b64):
@@ -35,9 +36,11 @@ def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings
     try:
         if part.file_type == "svg":
             from .geometry.svg_import import import_svg
-            return import_svg(data, warnings)
+            return import_svg(data, warnings, budget=budget)
         from .geometry.dxf_import import import_dxf
-        return import_dxf(data, warnings)
+        return import_dxf(data, warnings, budget=budget)
+    except TooDetailed:
+        raise
     except Exception as e:  # noqa: BLE001  (malformed files raise all sorts of things)
         raise ValueError(f"We couldn't read \"part {n}\" ({part.file_type.upper()}). Try exporting it again.") from e
 
@@ -87,13 +90,17 @@ def process(job: ContainerJob) -> ProcessResponse:
     m, mat, req = job.machine, job.material, job.request
     res = ProcessResponse()
     warnings = ImportWarnings()
+    budget = PointBudget(MAX_POINTS)  # shared by every part, so copies of a big file count too
 
     # import and place each part
     items: list[tuple[int, Item]] = []
     next_group = 0
     for pi, part in enumerate(req.parts):
         try:
-            got = _import_part(job, part, pi + 1, warnings)
+            got = _import_part(job, part, pi + 1, warnings, budget)
+        except TooDetailed:
+            res.errors = [TOO_DETAILED]
+            break
         except ValueError as e:
             res.errors.append(str(e))
             continue
@@ -134,7 +141,7 @@ def process(job: ContainerJob) -> ProcessResponse:
             res.errors.append("Nothing to laser. Is the design empty?")
         return res
     if sum(len(i.pts) for _, i in kept) > MAX_POINTS:
-        res.errors.append("This design is too detailed. Simplify it and try again.")
+        res.errors.append(TOO_DETAILED)
         return res
 
     x0, y0, x1, y1 = bbox([it for _, it in kept])
@@ -145,6 +152,9 @@ def process(job: ContainerJob) -> ProcessResponse:
     elif x0 < 0 or y0 < 0 or x1 > m.bed_width_mm or y1 > m.bed_height_mm:
         res.errors.append("The design goes off the edge of the laser bed. Move it or make it smaller.")
     res.bbox_mm = _round_box((x0, y0, x1, y1))
+    # Too big or off the edge: still draw the parts so the student can see why, but skip ordering,
+    # hatching and encoding. A design the size of a house would otherwise hatch for minutes.
+    off_bed = bool(res.errors)
 
     # build toolpaths per op across the whole job, in cutting order; preview per (part, op)
     # Which part a path came from, even if ordering reversed it: every placed point is its own tuple object.
@@ -159,8 +169,10 @@ def process(job: ContainerJob) -> ProcessResponse:
             closed = [i for _, i in group if i.closed]
             if len(closed) < len(group):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
-            paths = hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed])
+            paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed])
             shown = [i.pts for i in closed]
+        elif off_bed:
+            paths, shown = [], [i.pts for _, i in group]
         elif kind == "score":
             paths = shown = nearest_neighbour([i.pts for _, i in group])
         else:
@@ -171,6 +183,8 @@ def process(job: ContainerJob) -> ProcessResponse:
         if paths:
             layers.append((kind, s, paths))
     res.warnings = list(warnings)
+    if off_bed:
+        return res
 
     res.estimate_s = round(estimate_seconds(layers, m.travel_speed_mm_s), 1)
     if res.estimate_s > m.max_job_minutes * 60:

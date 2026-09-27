@@ -9,13 +9,33 @@ from shapely.geometry import Polygon
 from . import Pt
 
 MAX_CONTAINMENT_CHECK = 800  # O(n^2); student designs are small, so skip depth sorting beyond this
+MAX_NEAREST = 2_000  # nearest-neighbour is O(n^2) too; above this, sweep in bands instead
+SWEEP_BAND_MM = 10.0
 
 
 def _dist(a: Pt, b: Pt) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def _sweep(paths: list[list[Pt]], start: Pt, allow_reverse: bool) -> list[list[Pt]]:
+    """Cheap order for huge path counts: bands top to bottom, left-right then right-left."""
+    def key(p: list[Pt]) -> tuple[int, float]:
+        band = int(p[0][1] // SWEEP_BAND_MM)
+        return band, p[0][0] if band % 2 == 0 else -p[0][0]
+
+    out: list[list[Pt]] = []
+    cur = start
+    for p in sorted(paths, key=key):
+        if allow_reverse and p[0] != p[-1] and _dist(cur, p[-1]) < _dist(cur, p[0]):
+            p = p[::-1]
+        out.append(p)
+        cur = p[-1]
+    return out
+
+
 def nearest_neighbour(paths: list[list[Pt]], start: Pt = (0.0, 0.0), allow_reverse: bool = True) -> list[list[Pt]]:
+    if len(paths) > MAX_NEAREST:
+        return _sweep(paths, start, allow_reverse)
     left = list(paths)
     out: list[list[Pt]] = []
     cur = start

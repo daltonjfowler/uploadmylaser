@@ -8,7 +8,7 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.ttLib import TTFont
 from svgelements import Path
 
-from . import ImportWarnings, Item
+from . import ImportWarnings, Item, PointBudget
 from ..models import TextSpec
 from .svg_import import _flatten
 
@@ -35,7 +35,8 @@ def _font(name: str) -> TTFont:
     return _cache[path]
 
 
-def import_text(spec: TextSpec, warnings: ImportWarnings, tol_mm: float = 0.05) -> list[Item]:
+def import_text(spec: TextSpec, warnings: ImportWarnings, tol_mm: float = 0.05, budget: PointBudget | None = None) -> list[Item]:
+    budget = budget or PointBudget()
     if spec.font not in FONTS:
         warnings.add("That font isn't available, so we used Sans.")
     if spec.op == "cut" and spec.font in CUT_UNFRIENDLY:
@@ -60,7 +61,7 @@ def import_text(spec: TextSpec, warnings: ImportWarnings, tol_mm: float = 0.05) 
         glyphs[gname].draw(pen)
         d = pen.getCommands()
         if d:
-            for pts, closed in _flatten(Path(d), tol_mm / k):
+            for pts, closed in _flatten(Path(d), tol_mm / k, budget):
                 mm = [((pen_x + x) * k, (cap - y) * k) for x, y in pts]  # flip y: font is y-up
                 # one group per letter, so overlapping script letters fill as a union instead of cancelling out
                 items.append(Item("text", spec.op, mm, closed, group=gi))
