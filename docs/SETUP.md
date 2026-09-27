@@ -42,7 +42,8 @@ npx wrangler secret put TEACHER_KEY   # paste a long random string, e.g. from: n
 3. Replace the seeded "Masonite / Luan" preset with **your own tested settings**. Every material
    needs test cuts on your machine first.
 4. Set a class phrase and click **Warm up the processor**.
-5. Work through [TEST_PLAN.md](TEST_PLAN.md) on cardboard, starting with the `/serial-test.html` replay.
+5. Work through [TEST_PLAN.md](TEST_PLAN.md) on cardboard, starting with the `serial-test.html` replay
+   (local only: `npm run dev:web` on a laptop; it is not on the live site).
 6. If Chromebooks can't reach the site, school IT may need to unblock your domain.
 
 [DEPLOY.md](DEPLOY.md) is the day-to-day manual.

@@ -27,7 +27,7 @@ Stay at the machine with the lid closed for every job.
 
 | # | Job | Expect | Result |
 |---|---|---|---|
-| 1 | `serial-test.html` replay of `test/golden/20mm_absolute.rd` | cuts the square; fill in docs/HARDWARE.md table | |
+| 1 | `serial-test.html` replay (local `npm run dev:web` only, not live) of `test/golden/20mm_absolute.rd` | cuts the square; fill in docs/HARDWARE.md table | |
 | 2 | Connect from the student page | port picker shows the FTDI device (0403:6001) | |
 | 3 | Frame a 50 mm box | head traces the box, laser stays off | |
 | 4 | Does Frame start at the **current head position**? | yes → `D8 11` is right. No → see HARDWARE.md | |

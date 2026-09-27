@@ -9,7 +9,8 @@ anything not marked verified there as a guess.
 - `src/worker.ts`: Worker: KV presets, phrase gate, teacher key, forwards to `LaserContainer`.
 - `container/app/`: FastAPI. `geometry/` (svg/dxf/text import, placement, hatch, ordering),
   `ruida/` (swizzle, encoder, decoder), `pipeline.py` wires it together.
-- `web/`: Vite multi-page (index, teacher/, serial-test). No framework. Keep the bundle small, since
+- `web/`: Vite multi-page (index, teacher/, display/). `serial-test.html` is dev-only and must stay
+  OUT of the production build (it sends raw bytes to the laser). No framework. Keep the bundle small, since
   Chromebooks are slow. `workspace.ts` is the canvas, `main.ts` the app state, `shapes.ts` draws Box/Circle as SVG.
 - A design is a list of **parts** (file or text). Each part's placement puts its **top-right corner** at
   (xMm, yMm) after scale/rotate. Files go as multipart `file0..fileN`, matched by `fileIndex`.

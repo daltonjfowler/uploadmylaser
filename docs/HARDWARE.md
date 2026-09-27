@@ -22,8 +22,9 @@ people's reverse engineering.
 ## Phase 0 procedure
 1. **In LightBurn (Windows laptop):** make each test job at low power on cardboard, then use
    **File → Save RD file** into `test/golden/`. Fill in the table in `test/golden/README.md`.
-2. **Deploy from your home computer** (`npm run deploy`). Never run a local server on the school laptop.
-3. **On a Chromebook in Chrome:** open `https://<deployed-site>/serial-test.html`, plug in the laser, Connect, load `square-cut.rd`,
+2. The test page is **not on the live site** (it can send any file to the laser, past every safety
+   check). Run it on a Windows laptop: `npm run dev:web`, then open `http://localhost:5173/serial-test.html`.
+3. **In Chrome on that laptop:** plug in the laser, Connect, load `square-cut.rd`,
    check the summary says "ends with D7", then Send. Stay at the machine.
 4. Copy the log into this file and fill in the table above.
 
