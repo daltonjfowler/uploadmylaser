@@ -1,7 +1,9 @@
 // Teacher page, in the same flow as uploadmycode's: the key, today's phrase (with a projector
 // display and a pop-out window), then the laser's materials and machine settings.
 import type { MachineConfig, Material, OpKind, OpSettings } from '../../shared/contracts';
+import { MIN_PHRASE_LENGTH } from '../../shared/contracts';
 import { OP_LABELS } from './ops';
+import { generatePhrase } from './phrase-words';
 import { initThemeButton } from './theme';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -68,27 +70,6 @@ $('forget').onclick = () => {
 
 // ---------- phrase ----------
 
-// Short, spellable, classroom-safe. Three joined with hyphens read well off a projector.
-const WORDS = [
-  'apple', 'anchor', 'banjo', 'blue', 'bridge', 'cactus', 'candle', 'cedar', 'cherry', 'cobalt', 'comet', 'copper',
-  'coral', 'crayon', 'delta', 'dragon', 'ember', 'falcon', 'ferry', 'forest', 'garden', 'ginger', 'granite', 'harbor',
-  'hazel', 'indigo', 'island', 'jasper', 'jungle', 'kayak', 'lantern', 'lemon', 'lily', 'magnet', 'mango', 'maple',
-  'marble', 'meadow', 'mint', 'nickel', 'olive', 'orbit', 'otter', 'pancake', 'pebble', 'pepper', 'piano', 'pilot',
-  'planet', 'pumpkin', 'quartz', 'quilt', 'rabbit', 'radish', 'ranger', 'raven', 'river', 'robot', 'rocket', 'saffron',
-  'sailor', 'silver', 'sparrow', 'spruce', 'sunset', 'tandem', 'thunder', 'tiger', 'timber', 'tulip', 'umbrella',
-  'valley', 'velvet', 'walnut', 'willow', 'window', 'yellow', 'zebra',
-];
-
-function generatePhrase(): string {
-  const picked: string[] = [];
-  while (picked.length < 3) {
-    const n = crypto.getRandomValues(new Uint32Array(1))[0];
-    const w = WORDS[n % WORDS.length];
-    if (!picked.includes(w)) picked.push(w); // "robot-robot-maple" reads like a typo
-  }
-  return picked.join('-');
-}
-
 interface PhraseState { phrase: string | null; expiresAt: number | null }
 let expiresAt = 0;
 
@@ -149,6 +130,9 @@ $('generate').onclick = () => {
 $('set').onclick = async () => {
   const phrase = phraseInput.value.trim();
   if (!phrase) return say('Type a phrase, or press Generate.', 'error');
+  if (normalize(phrase).length < MIN_PHRASE_LENGTH) {
+    return say(`The phrase needs at least ${MIN_PHRASE_LENGTH} characters so students outside the class cannot guess it. Press Generate for a good one.`, 'error');
+  }
   const ttlMinutes = Number($<HTMLSelectElement>('duration').value);
   // Ask the server what is live rather than trusting this page: another teacher, in another
   // room, may have set theirs twenty minutes ago. One phrase serves the whole site.

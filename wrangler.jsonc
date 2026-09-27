@@ -35,6 +35,13 @@
       "max_instances": 2
     }
   ],
+  // Per-IP fuses checked before the class phrase (src/ip-limit.ts), so phrases cannot be guessed
+  // without limit. A school shares one IP, so each limit EQUALS the site-wide limit in
+  // src/ratelimit.ts (400 a minute): never lower. namespace_id is unique across the whole account.
+  "ratelimits": [
+    { "name": "PROCESS_IP_LIMIT", "namespace_id": "20260940", "simple": { "limit": 400, "period": 60 } },
+    { "name": "PHRASE_IP_LIMIT", "namespace_id": "20260941", "simple": { "limit": 400, "period": 60 } }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "PROCESSOR", "class_name": "LaserContainer" },

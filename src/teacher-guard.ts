@@ -7,6 +7,9 @@
 //     -> a CORRECT key always works (the Worker compares the key first and only asks this guard
 //        about keys that were already wrong)
 //
+// Compare-first and no per-IP limit ON PURPOSE (unlike the class phrase): the key is 192-bit random, so
+// guessing is hopeless anyway, and a limit could let someone on the shared school IP lock the teacher out.
+//
 // Lives in the Counters Durable Object, in memory. Pure apart from the clock.
 
 export const GLOBAL_TEACHER_MAX_FAILURES = 100;

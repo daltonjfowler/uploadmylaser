@@ -7,9 +7,11 @@
 // Safety rule: power/speed only ever come from KV (teacher presets). Student requests carry a
 // materialId and nothing else that affects the laser beam (src/process-request.ts).
 //
-// Gate order for POST /api/process: size → school CIDR lock → class phrase → rate limits →
-// strict validation → container. Limits run after the phrase so wrong guesses never spend
-// anyone's budget. Nothing is ever per-IP punitive: a school shares one public IP.
+// Gate order for POST /api/process: size → school CIDR lock → per-IP limit → class phrase →
+// rate limits → strict validation → container. The per-IP limit (src/ip-limit.ts) comes before
+// the phrase so phrases cannot be guessed without limit; it equals the site-wide limit because a
+// school shares one public IP. The other limits run after the phrase so wrong guesses never spend
+// anyone else's budget.
 
 import { Container, getContainer } from '@cloudflare/containers';
 import { DurableObject } from 'cloudflare:workers';
@@ -19,9 +21,9 @@ import { ipAllowed, parseCidrList, type Cidr } from './cidr.ts';
 import { constantTimeEquals } from './constant-time.ts';
 import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
+import { checkIpLimit } from './ip-limit.ts';
 import {
-  activeRecord, clampTtlMinutes, isUsablePhrase, MAX_PHRASE_LENGTH, MIN_PHRASE_LENGTH, normalizePhrase,
-  PHRASE_KEY, type PhraseRecord,
+  activeRecord, clampTtlMinutes, isUsablePhrase, normalizePhrase, PHRASE_KEY, phraseLengthMessage, type PhraseRecord,
 } from './phrase.ts';
 import { publicMachine, publicMaterials, validateMachine, validateMaterials } from './presets.ts';
 import { MAX_REQUEST_JSON_BYTES, parseProcessRequest } from './process-request.ts';
@@ -37,6 +39,8 @@ interface Env {
   CLASS_KV: KVNamespace;
   PROCESSOR: DurableObjectNamespace<LaserContainer>;
   COUNTERS: DurableObjectNamespace<Counters>;
+  PHRASE_IP_LIMIT: RateLimit; // wrangler.jsonc "ratelimits"
+  PROCESS_IP_LIMIT: RateLimit;
   TEACHER_KEY?: string; // secret: npx wrangler secret put TEACHER_KEY
   ALLOWED_CIDRS?: string;
 }
@@ -107,6 +111,7 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (p === '/api/machine' && m === 'GET') return json(publicMachine(await getMachine(env)));
   if (p === '/api/phrase/check' && m === 'POST') {
     checkCidr(req, env);
+    await checkIpLimit(env.PHRASE_IP_LIMIT, req.headers.get('cf-connecting-ip') ?? '');
     await checkPhrase(req, env);
     return json({ ok: true });
   }
@@ -158,6 +163,7 @@ async function processDesign(req: Request, env: Env): Promise<Response> {
   const declared = Number(req.headers.get('content-length') ?? 0);
   if (Number.isFinite(declared) && declared > MAX_PROCESS_BODY_BYTES) throw new HttpError(413, tooBig);
   checkCidr(req, env);
+  await checkIpLimit(env.PROCESS_IP_LIMIT, req.headers.get('cf-connecting-ip') ?? '');
   await checkPhrase(req, env);
 
   const verdict = await countersStub(env).checkProcessRate(
@@ -260,7 +266,7 @@ async function setPhrase(req: Request, env: Env): Promise<Response> {
   const body = await readJson(req, MAX_TEACHER_BYTES);
   const b = (typeof body === 'object' && body !== null ? body : {}) as { phrase?: unknown; ttlMinutes?: unknown };
   const phrase = normalizePhrase(b.phrase);
-  if (!isUsablePhrase(phrase)) throw new HttpError(400, `Phrase must be ${MIN_PHRASE_LENGTH} to ${MAX_PHRASE_LENGTH} characters.`);
+  if (!isUsablePhrase(phrase)) throw new HttpError(400, phraseLengthMessage());
   const ttlMinutes = clampTtlMinutes(b.ttlMinutes);
   const rec: PhraseRecord = { phrase, expiresAt: Date.now() + ttlMinutes * 60_000 };
   // expirationTtl is KV's own cleanup; expiresAt is what the Worker enforces.
@@ -293,7 +299,8 @@ async function teacherGate(req: Request, env: Env): Promise<void> {
   throw new HttpError(401, 'Wrong teacher key.');
 }
 
-// A wrong phrase is a plain refusal every time: never counted, delayed or locked out.
+// A wrong phrase is a plain refusal: never delayed or locked out, only counted by the per-IP fuse
+// that runs first. Compared in constant time.
 async function checkPhrase(req: Request, env: Env): Promise<void> {
   const rec = await readActivePhrase(env);
   if (!rec) throw new HttpError(403, 'The laser is closed. Ask your teacher for today\'s class phrase.');

@@ -96,6 +96,10 @@ export interface ProcessResponse {
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // all files in one request together
 export const MAX_PARTS = 100; // room for patterns (copies of one file share its fileIndex)
+// Class phrases (src/phrase.ts). Long enough that guessing is hopeless at the per-IP limit; generated
+// phrases (web/src/phrase-words.ts) are always longer.
+export const MIN_PHRASE_LENGTH = 12;
+export const MAX_PHRASE_LENGTH = 64;
 
 /** Fonts for the Text tool. Ids must match FONTS in container/app/geometry/text_import.py.
  *  `css` is the Google Fonts family, used to preview the font in the picker. */

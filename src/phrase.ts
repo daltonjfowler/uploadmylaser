@@ -2,9 +2,10 @@
 // KV expiry is eventually consistent (a cached read can outlive it by ~60 s), so `expiresAt` is
 // the real deadline and is checked on every read. Pure: test/phrase.test.mjs runs it.
 
+import { MAX_PHRASE_LENGTH, MIN_PHRASE_LENGTH } from '../shared/contracts.ts';
+
+export { MAX_PHRASE_LENGTH, MIN_PHRASE_LENGTH };
 export const PHRASE_KEY = 'phrase';
-export const MIN_PHRASE_LENGTH = 4;
-export const MAX_PHRASE_LENGTH = 64;
 export const MIN_TTL_MINUTES = 15;
 export const MAX_TTL_MINUTES = 7 * 24 * 60; // the teacher page offers up to 1 week
 export const DEFAULT_TTL_MINUTES = 480;
@@ -22,6 +23,10 @@ export function normalizePhrase(raw: unknown): string {
 
 export function isUsablePhrase(norm: string): boolean {
   return norm.length >= MIN_PHRASE_LENGTH && norm.length <= MAX_PHRASE_LENGTH;
+}
+
+export function phraseLengthMessage(): string {
+  return `The phrase needs at least ${MIN_PHRASE_LENGTH} characters (at most ${MAX_PHRASE_LENGTH}) so students outside the class cannot guess it. Press Generate for a good one.`;
 }
 
 // Missing or junk becomes the default rather than an error; the response echoes what was set.
