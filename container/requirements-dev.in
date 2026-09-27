@@ -1,0 +1,4 @@
+# Test-only extras on top of requirements.in. requirements-dev.txt is the hashed lock for a local venv.
+-r requirements.in
+pytest==9.1.1
+httpx==0.28.1

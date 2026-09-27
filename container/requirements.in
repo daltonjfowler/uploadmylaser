@@ -1,0 +1,9 @@
+# Direct dependencies, pinned to what a fresh image build installed. requirements.txt is the hashed lock
+# the Dockerfile installs (the note at its top says how to regenerate it).
+fastapi==0.141.1
+uvicorn==0.54.0
+pydantic==2.13.5
+svgelements==1.9.6
+ezdxf==1.4.4
+shapely==2.1.2
+fonttools==4.66.0
