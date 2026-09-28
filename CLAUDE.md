@@ -30,6 +30,9 @@ anything not marked verified there as a guess.
    build it is `deleteOneFile` in `web/src/ruida/panel.ts`: one slot (never 0), used only by
    `LaserLink.sendToPanel` to replace a file with the same name, after re-reading that slot. The container
    never emits any `E8` command (`test_encoder_never_emits_file_commands`).
+7. The browser never starts a job (Dalton, 2026-09-28). Send only loads it; students Frame and Start
+   on the laser's panel. The controller keeps only the last file it got, so the app has no Frame
+   button: a streamed frame file would replace the job and panel Start would re-run the frame.
 
 ## Ruida notes
 - The RDC6445S uses swizzle magic 0x88. USB is an FTDI FT245R FIFO (VID 0403, PID 6001): no ACK, no

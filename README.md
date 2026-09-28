@@ -39,8 +39,9 @@ circle, with the text selected. There is a [dark mode](docs/screenshot-student-d
   and mouse-wheel or pinch zoom. Designs autosave to the Chromebook's `localStorage`.
 - **Runs in a safe order.** Engrave, then Mark, then Cut through, always last with all its passes,
   because parts that are cut free can shift. Inner cuts go before outer ones.
-- **Frame before every Send.** The laser traces the job's outline with the beam off. Send stays
-  disabled until this exact job has been framed and the student ticks "I will stay with the laser".
+- **The laptop never starts the laser.** Send only loads the job; the student then presses Frame
+  (beam off) and Start on the laser's own panel, so someone is always at the machine. Send stays
+  disabled until the student ticks "I will stay with the laser".
   STOP is sent from the browser, so it works even if the network is down (and Esc does the same).
 - **A rolling class phrase.** The teacher sets today's phrase, with an expiry, from a `/teacher` page
   guarded by a secret key. The site opens for anyone, but nothing is processed without the phrase.

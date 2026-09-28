@@ -119,10 +119,9 @@
         <ol id="steps" class="steps"></ol>
         <p id="estimate" class="small"></p>
         <ul id="messages" class="messages"></ul>
-        <button id="frame" class="wide" disabled data-hint="Traces a box around your design with the laser OFF, so you can check it fits your material.">Frame (laser off)</button>
         <label class="ack"><input type="checkbox" id="ack"> The lid is closed and I will stay with the laser the whole time.</label>
         <label class="panelname" id="panelNameRow" hidden data-hint="The name your job gets in the laser's file list. Up to 8 letters or numbers.">Name on the laser <input id="panelName" maxlength="8" autocomplete="off" spellcheck="false"></label>
-        <button id="send" class="go wide" disabled data-hint="Sends your design to the laser.">Send to laser</button>
+        <button id="send" class="go wide" disabled data-hint="Loads your design onto the laser. It does NOT start it: you press Frame, then Start, on the laser itself.">Send to laser</button>
         <progress id="progress" max="1" value="0" hidden></progress>
         <button id="stop" class="stop wide" hidden>STOP</button>
       </section>
@@ -173,7 +172,7 @@
           <ul>
             <li><b>Black</b> cuts through, <b style="color:#dc2626">red</b> marks a line, <b style="color:#2563eb">blue</b> engraves (fills). The laser always runs Engrave, then Mark, then Cut through.</li>
             <li>The green dot is the <b>top-right corner</b> of your design. Move the laser head there on the machine.</li>
-            <li>Always <b>Frame</b> first: the laser traces the outline with the beam off, so you can check it fits your material.</li>
+            <li><b>Send to laser</b> only loads your design. Then, on the laser, press <b>Frame</b> (the head traces the outline with the beam off) to check it fits your material, and press <b>Start</b>.</li>
             <li><b>Open</b> starts over with a file. <b>Import</b> adds a file next to what's there.</li>
             <li>Text inside an SVG must be converted to paths first, or use the Text tool.</li>
             <li>Cutting out letters? Use the <b>Stencil</b> font so O, A and B keep their middles.</li>

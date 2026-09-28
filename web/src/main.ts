@@ -39,7 +39,6 @@ let powerChoice: Partial<Record<OpKind, number>> = {};
 let result: ProcessResponse | null = null;
 let resultIds: number[] = []; // part id for each index in `result`
 let pending = false;          // a change is waiting for the server, so `result` is out of date
-let framedRd: string | null = null;
 let notes: string[] = [];     // "Frame sent." and friends
 let link: LaserLink | null = null;
 let locked = true;            // resize keeps the shape (the lock button in the size bar)
@@ -1240,7 +1239,6 @@ function setConnected(on: boolean): void {
   $('connect').textContent = on ? 'Disconnect' : 'Connect laser';
   $('stop').hidden = !on;
   $('stopTop').hidden = !on;
-  if (!on) framedRd = null;
   updateButtons();
 }
 
@@ -1248,22 +1246,20 @@ function updateButtons(): void {
   const hasJob = !!result?.rd && !pending && !result.errors.length;
   const connected = !!link?.connected;
   const idle = !link?.sending;
-  const framed = hasJob && framedRd === result!.rd;
   const ack = $<HTMLInputElement>('ack').checked;
-  $<HTMLButtonElement>('frame').disabled = !(hasJob && connected && idle);
   const toPanel = !!machine.sendToPanel;
   $('panelNameRow').hidden = !toPanel;
   const nameBox = $<HTMLInputElement>('panelName');
   if (toPanel && !panelNameTyped && document.activeElement !== nameBox) nameBox.value = suggestedPanelName();
   const named = !toPanel || !!cleanPanelName(nameBox.value);
-  $<HTMLButtonElement>('send').disabled = !(hasJob && connected && idle && framed && ack && named);
+  $<HTMLButtonElement>('send').disabled = !(hasJob && connected && idle && ack && named);
   const steps: [string, boolean][] = [
     ['Pick your material', !!materialId],
     ['Enter the class phrase', !!getPhrase()],
     ['Add a design with no problems', hasJob],
     ['Connect the laser', connected],
-    ['Frame it and check it fits', framed],
     ['Promise to stay with the laser', ack],
+    ['Send, then Frame and Start on the laser', false],
   ];
   $('steps').replaceChildren(...steps.map(([t, done]) => Object.assign(document.createElement('li'), { textContent: t, className: done ? 'done' : '' })));
 }
@@ -1283,9 +1279,9 @@ function suggestedPanelName(): string {
   return 'DESIGN';
 }
 
-async function sendBytes(b64: string, what: 'Frame' | 'Job'): Promise<boolean> {
+async function sendBytes(b64: string): Promise<boolean> {
   if (!link) return false;
-  const panelName = what === 'Job' && machine.sendToPanel ? cleanPanelName($<HTMLInputElement>('panelName').value) : '';
+  const panelName = machine.sendToPanel ? cleanPanelName($<HTMLInputElement>('panelName').value) : '';
   const prog = $<HTMLProgressElement>('progress');
   prog.hidden = false;
   prog.value = 0;
@@ -1294,10 +1290,10 @@ async function sendBytes(b64: string, what: 'Frame' | 'Job'): Promise<boolean> {
     const onProgress = (s: number, t: number) => { prog.value = s / t; };
     if (panelName) {
       const replaced = await link.sendToPanel(fromBase64(b64), panelName, onProgress);
-      notes = [`Saved on the laser as ${panelName}${replaced ? ', replacing the old file with that name' : ''}. Start it from the laser's screen, and watch the laser the whole time.`];
+      notes = [`Saved on the laser as ${panelName}${replaced ? ', replacing the old file with that name' : ''}. On the laser, pick it, press Frame to check it fits, then press Start. Watch the laser the whole time.`];
     } else {
       await link.send(fromBase64(b64), onProgress);
-      notes = [what === 'Frame' ? 'Frame sent. Watch the laser trace the box. Does it fit your material?' : 'Job sent. Watch the laser the whole time.'];
+      notes = ['Loaded on the laser. On the laser, press Frame and check it fits your material, then press Start. Watch the laser the whole time.'];
     }
     return true;
   } catch (e) {
@@ -1309,17 +1305,10 @@ async function sendBytes(b64: string, what: 'Frame' | 'Job'): Promise<boolean> {
   }
 }
 
-$('frame').onclick = async () => {
-  if (!result?.frameRd || !result.rd) return;
-  const rd = result.rd;
-  if (await sendBytes(result.frameRd, 'Frame')) framedRd = rd;
-  updateButtons();
-};
 $('send').onclick = async () => {
   if (!result?.rd) return;
-  await sendBytes(result.rd, 'Job');
-  $<HTMLInputElement>('ack').checked = false; // confirm again, and frame again, before the next piece
-  framedRd = null;
+  await sendBytes(result.rd);
+  $<HTMLInputElement>('ack').checked = false; // confirm again before the next piece
   updateButtons();
 };
 
@@ -1421,7 +1410,7 @@ function defaultHint(): void {
       ? 'Open an SVG or DXF file, or use Text, Box or Circle on the left.'
       : !getPhrase()
         ? 'Arrange your design. When you are ready, enter the class phrase in the Laser panel to check it.'
-        : 'Drag parts or the purple grip to move them. Scroll or pinch to zoom. Then connect the laser, Frame, and Send.';
+        : 'Drag parts or the purple grip to move them. Scroll or pinch to zoom. Then connect the laser and Send. Frame and Start on the laser.';
 }
 
 // ---------- saving the design on this Chromebook ----------

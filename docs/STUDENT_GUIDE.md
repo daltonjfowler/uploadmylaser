@@ -25,8 +25,10 @@ pieces that are cut free can move.
    Scroll or pinch to zoom.
 5. Wait your turn. Plug the laser's USB cable into your Chromebook and click **Connect laser**.
 6. Move the laser head to where the **top-right corner** of your design should go (the green dot).
-7. Click **Frame (laser off)**. Watch the head trace a box. Make sure it fits on your material.
-8. Close the lid. Tick **"I will stay with the laser"**. Click **Send to laser**.
+7. Close the lid. Tick **"I will stay with the laser"**. Click **Send to laser**. This only loads
+   your design. The laser does not start.
+8. On the laser, press **Frame**. Watch the head trace a box with the beam off. Make sure it fits
+   on your material. Then press **Start** on the laser.
 9. **Stay with the laser the whole time.** If anything looks wrong, press **STOP** (or Esc), or the
    red emergency stop button on the laser.
 
