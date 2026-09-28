@@ -217,7 +217,8 @@ def encode_job(layers: list[EncLayer], m: MachineConfig, *, laser_on: bool = Tru
         w(b"\xCA\x02", bytes([part]))                  # layer number
         w(b"\xCA\x01\x30")
         w(b"\xCA\x01\x10")                             # laser device 0
-        w(b"\xCA\x01\x13" if s.air_assist else b"\xCA\x01\x12")
+        # Frame (laser off) never needs air: the teacher saw the blower run while framing.
+        w(b"\xCA\x01\x13" if s.air_assist and laser_on else b"\xCA\x01\x12")
         w(b"\xC9\x02", enc_speed(s.speed_mm_s))
         if not scan:
             w(b"\xC6\x50", enc14(0))                   # through power 1

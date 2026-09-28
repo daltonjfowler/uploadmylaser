@@ -91,6 +91,15 @@ def test_frame_has_no_cut_commands():
     assert not any(c.name.startswith("CUT_") for c in decode_plain(raw))
 
 
+def test_frame_turns_air_assist_off():
+    """The teacher saw the blower run during Frame: a laser-off file must never switch air on."""
+    airy = CUT.model_copy(update={"air_assist": True})
+    job = unswizzle(encode_job([EncLayer("cut", airy, [_square()])], M), M.swizzle_magic)
+    frame = unswizzle(encode_job([EncLayer("cut", airy, [_square()])], M, laser_on=False), M.swizzle_magic)
+    assert b"\xCA\x01\x13" in job
+    assert b"\xCA\x01\x13" not in frame and b"\xCA\x01\x12" in frame
+
+
 GOLDEN_FILES = sorted(GOLDEN.glob("*.rd")) if GOLDEN.exists() else []
 needs_golden = pytest.mark.skipif(not GOLDEN_FILES, reason="no golden files yet")
 

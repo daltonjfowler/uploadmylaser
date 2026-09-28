@@ -49,7 +49,8 @@ export const LIBRARY: PathShape[] = [
   { id: 'gear', label: 'Gear', d: gear(12), closed: true },
   { id: 'burst', label: 'Starburst', d: star(12, 40), closed: true },
   { id: 'cloud', label: 'Cloud', d: 'M22 30 A16 16 0 0 1 50 16 A20 20 0 0 1 86 30 A15 15 0 0 1 88 60 H14 A15 15 0 0 1 22 30 Z', closed: true },
-  { id: 'plant', label: 'teachChat.app', d: 'M18 55 H82 V66 H76 L70 100 H30 L24 66 H18 Z M47 55 V34 C38 36 12 30 8 8 C30 6 44 16 47 28 V24 C50 10 66 0 92 2 C90 22 70 32 53 30 V55 Z', closed: true },
+  // One outline: pot and sprout share the stem's base, so cutting two loops split them into two pieces.
+  { id: 'plant', label: 'teachChat.app', d: 'M18 55 H47 V34 C38 36 12 30 8 8 C30 6 44 16 47 28 V24 C50 10 66 0 92 2 C90 22 70 32 53 30 V55 H82 V66 H76 L70 100 H30 L24 66 H18 Z', closed: true },
 
   // sports
   { id: 'basketball', label: 'Basketball', group: 'Sports', d: hole(50, 50, 50), closed: true,
