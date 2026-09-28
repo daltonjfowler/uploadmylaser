@@ -15,7 +15,7 @@ export const DEFAULT_MACHINE: MachineConfig = {
   absoluteMaxPowerPct: 80,
   minSpeedMmS: 3,
   travelSpeedMmS: 300,
-  sendToPanel: false, // off until tested on the real laser (docs/HARDWARE.md, Send to panel)
+  sendToPanel: true, // Dalton 2026-09-28: named files on the panel, not TEMP. First real-laser test that day.
 };
 
 export const SEED_MATERIALS: Material[] = [
