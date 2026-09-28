@@ -1,9 +1,10 @@
 // In-browser previews, so the tools work before the class phrase is entered (or while the server
-// works). Boxes and circles are exact. Text and SVG files are close. DXF shows its size if the file
-// records it. The server's preview replaces these as soon as it arrives.
+// works). Boxes and circles are exact. Text and SVG files are close. DXF shows a grey outline of its lines
+// (dxf.ts). The server's preview replaces these as soon as it arrives.
 import type { OpKind, Placement, TextSpec } from '../../shared/contracts';
 import { TEXT_FONTS } from '../../shared/contracts';
-import { OP_COLORS } from './ops';
+import { OP_COLORS, UNSURE } from './ops';
+import { sketchDxf, type DxfSketch } from './dxf';
 import type { ShapeKind, ViewBox } from './shapes';
 import type { Box, PartView } from './workspace';
 
@@ -18,7 +19,7 @@ export interface DesignPart extends Placement { id: number; source: Source }
 const PX_MM = 25.4 / 96;
 const UNITS: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: PX_MM, '': PX_MM };
 
-interface FileInfo { data: string; w: number; h: number; img: HTMLImageElement | null; known: boolean }
+interface FileInfo { data: string; w: number; h: number; img: HTMLImageElement | null; dxf: DxfSketch | null; known: boolean }
 const files = new Map<number, FileInfo>();
 
 /** Natural size in mm, before scale and rotation. */
@@ -26,7 +27,7 @@ function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => vo
   const cached = files.get(p.id);
   if (cached && cached.data === p.source.data) return cached;
   const { data, fileType } = p.source;
-  let info: FileInfo = { data, w: 50, h: 50, img: null, known: false };
+  let info: FileInfo = { data, w: 50, h: 50, img: null, dxf: null, known: false };
   if (fileType === 'svg') {
     const size = svgSize(data);
     if (size) info = { ...info, w: size[0], h: size[1], known: true };
@@ -35,8 +36,19 @@ function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => vo
     img.src = URL.createObjectURL(new Blob([data], { type: 'image/svg+xml' }));
     info.img = img;
   } else {
-    const size = dxfSize(data);
-    if (size) info = { ...info, w: size[0], h: size[1], known: true };
+    let sk: DxfSketch | null = null;
+    try {
+      sk = sketchDxf(data);
+    } catch {
+      sk = null; // the server reads it properly and explains any problem
+    }
+    if (sk) {
+      const k = sk.mmPerUnit;
+      info = { ...info, w: Math.max(sk.vb.w * k, 0.1), h: Math.max(sk.vb.h * k, 0.1), dxf: sk, known: true };
+    } else {
+      const size = dxfSize(data);
+      if (size) info = { ...info, w: size[0], h: size[1], known: true };
+    }
   }
   files.set(p.id, info);
   return info;
@@ -59,6 +71,7 @@ function svgSize(data: string): [number, number] | null {
   }
 }
 
+/** Fallback when we can't draw the lines: the extents AutoCAD saved, in the file's units. */
 function dxfSize(data: string): [number, number] | null {
   const pt = (name: string) => {
     const m = data.match(new RegExp(`\\$${name}\\s*\\r?\\n\\s*10\\s*\\r?\\n\\s*(\\S+)\\s*\\r?\\n\\s*20\\s*\\r?\\n\\s*(\\S+)`));
@@ -123,9 +136,11 @@ export function localView(p: DesignPart, onLoad: () => void): PartView {
     view.sketch = { kind: 'text', value: s.text.value || ' ', font: fontCss(s.text.font), color: OP_COLORS[s.text.op], fill: s.text.op === 'engrave', rot: p.rotateDeg };
   } else {
     const info = files.get(p.id);
-    view.sketch = info?.img && info.known
-      ? { kind: 'image', img: info.img, rot: p.rotateDeg }
-      : { kind: 'label', text: info?.known ? s.name : `${s.name} (size shown after checking)`, rot: p.rotateDeg };
+    view.sketch = info?.dxf
+      ? { kind: 'path', d: info.dxf.d, vb: info.dxf.vb, color: UNSURE, fill: false, rot: p.rotateDeg }
+      : info?.img && info.known
+        ? { kind: 'image', img: info.img, rot: p.rotateDeg }
+        : { kind: 'label', text: info?.known ? s.name : `${s.name} (size shown after checking)`, rot: p.rotateDeg };
   }
   return view;
 }

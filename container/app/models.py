@@ -104,8 +104,14 @@ class PreviewLayer(_Camel):
     paths: list[list[tuple[float, float]]]
 
 
+class PartPaths(_Camel):
+    part: int
+    paths: list[list[tuple[float, float]]]
+
+
 class ProcessResponse(_Camel):
     preview: list[PreviewLayer] = []
+    unassigned: list[PartPaths] = []  # lines whose colour the student hasn't chosen yet, per part
     part_boxes: list[Optional[tuple[float, float, float, float]]] = []  # one per request part
     bbox_mm: Optional[tuple[float, float, float, float]] = None
     rd: Optional[str] = None

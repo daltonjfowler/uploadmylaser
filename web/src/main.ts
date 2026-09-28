@@ -17,6 +17,7 @@ import { fromBase64 } from './ruida/swizzle';
 import { LaserLink } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
+import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
 import { cadAngle, Workspace, type Box, type Dim, type PartView } from './workspace';
@@ -124,7 +125,10 @@ function find(id: number | null): DesignPart | undefined {
 function viewOf(p: DesignPart): PartView {
   const i = resultIds.indexOf(p.id);
   const box = i >= 0 ? result?.partBoxes[i] : null;
-  if (result && box) return { id: p.id, box, layers: result.preview.filter((l) => l.part === i) };
+  if (result && box) {
+    const unassigned = (result.unassigned ?? []).filter((u) => u.part === i).flatMap((u) => u.paths);
+    return { id: p.id, box, layers: result.preview.filter((l) => l.part === i), unassigned };
+  }
   return localView(p, render);
 }
 
@@ -310,7 +314,17 @@ async function readFile(f: File): Promise<Source | null> {
     render();
     return null;
   }
-  return { kind: 'file', name: f.name, fileType: name.endsWith('.dxf') ? 'dxf' : 'svg', data: await f.text() };
+  if (name.endsWith('.svg')) return { kind: 'file', name: f.name, fileType: 'svg', data: await f.text() };
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  const flavour = dxfFlavour(String.fromCharCode(...bytes.subarray(0, 32)));
+  if (flavour === 'dwg') {
+    notes = ['That file is a DWG, not a DXF. In AutoCAD, use Save As and pick "AutoCAD 2013 DXF" (or any DXF), then open that file.'];
+    render();
+    return null;
+  }
+  // A binary DXF is kept one char per byte and sent as the same bytes (see buildRequest).
+  const data = flavour === 'binary' ? bytesToBinaryString(bytes) : new TextDecoder().decode(bytes);
+  return { kind: 'file', name: f.name, fileType: 'dxf', data };
 }
 
 $('open').onclick = () => {
@@ -929,12 +943,15 @@ function renderColors(): void {
   $('colorList').replaceChildren(...keys.map((key) => {
     const row = document.createElement('div');
     row.className = 'colorrow';
-    const [kind, value] = key.split(/:(.*)/s);
+    const [kind, rest] = key.split(/:(.*)/s);
+    // DXF keys are `dxf:LAYER` or, for a colour we don't know, `dxf:LAYER|#rrggbb`
+    const [value, dxfColor] = kind === 'dxf' ? (rest ?? '').split(/\|(?=#[0-9a-f]{6}$)/i) : [rest];
     const sw = document.createElement('span');
     sw.className = 'swatch';
-    if (value?.startsWith('#')) sw.style.background = value;
+    const swatch = dxfColor ?? value;
+    if (swatch?.startsWith('#')) sw.style.background = swatch;
     const label = document.createElement('span');
-    label.textContent = kind === 'dxf' ? `Layer "${value}"` : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
+    label.textContent = kind === 'dxf' ? `Layer "${value}"${dxfColor ? ' (this colour)' : ''}` : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
     row.append(sw, label);
     for (const choice of [...ops, 'ignore'] as ColorChoice[]) {
       const btn = document.createElement('button');
@@ -1107,7 +1124,9 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
           : shapeSvg(s.shape, s.wMm, s.hMm, s.op);
       let fileIndex = fileOf.get(data);
       if (fileIndex === undefined) { // pattern copies share one upload
-        fileIndex = files.push(new Blob([data], { type: s.kind === 'file' && s.fileType === 'dxf' ? 'application/dxf' : 'image/svg+xml' })) - 1;
+        const dxf = s.kind === 'file' && s.fileType === 'dxf';
+        const body = dxf && dxfFlavour(data.slice(0, 32)) === 'binary' ? binaryStringToBytes(data) : data;
+        fileIndex = files.push(new Blob([body as BlobPart], { type: dxf ? 'application/dxf' : 'image/svg+xml' })) - 1;
         fileOf.set(data, fileIndex);
       }
       if (s.kind === 'shape' || s.kind === 'path') { pl.scale = 1; delete pl.scaleY; }
@@ -1173,7 +1192,7 @@ function shiftResult(id: number, dx: number, dy: number): void {
   if (!result || i < 0) return;
   const b = result.partBoxes[i];
   if (b) result.partBoxes[i] = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
-  for (const l of result.preview) {
+  for (const l of [...result.preview, ...(result.unassigned ?? [])]) {
     if (l.part === i) l.paths = l.paths.map((path) => path.map(([x, y]) => [x + dx, y + dy] as [number, number]));
   }
   const boxes = result.partBoxes.filter((x): x is Box => !!x);

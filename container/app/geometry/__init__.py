@@ -50,6 +50,10 @@ class PointBudget:
             raise TooDetailed()
 
 
+class ImportProblem(ValueError):
+    """A file we read fine but can't laser. The message is for the student; `{part}` names the part."""
+
+
 class ImportWarnings(list):
     def add(self, msg: str) -> None:
         if msg not in self:

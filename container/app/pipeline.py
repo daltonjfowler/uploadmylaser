@@ -5,11 +5,11 @@ import base64
 import binascii
 import math
 
-from .geometry import MAX_POINTS, TOO_DETAILED, ImportWarnings, Item, PointBudget, Pt, TooDetailed
+from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .geometry.hatch import hatch
 from .geometry.order import nearest_neighbour, order_cuts
 from .geometry.transform import bbox, place
-from .models import ContainerJob, OpKind, OpSettings, Part, PreviewLayer, ProcessResponse
+from .models import ContainerJob, OpKind, OpSettings, Part, PartPaths, PreviewLayer, ProcessResponse
 from .ruida.encoder import EncLayer, clamp_settings, encode_job, frame_layers, machine_converter
 
 LAYER_ORDER: tuple[OpKind, ...] = ("engrave", "score", "cut")
@@ -41,6 +41,8 @@ def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings
         return import_dxf(data, warnings, budget=budget)
     except TooDetailed:
         raise
+    except ImportProblem as e:  # read fine, but nothing we can laser: say what to change
+        raise ValueError(str(e).replace("{part}", f'"part {n}"')) from e
     except Exception as e:  # noqa: BLE001  (malformed files raise all sorts of things)
         raise ValueError(f"We couldn't read \"part {n}\" ({part.file_type.upper()}). Try exporting it again.") from e
 
@@ -129,10 +131,15 @@ def process(job: ContainerJob) -> ProcessResponse:
         kept.append((pi, Item(it.key, kind, it.pts, it.closed, it.group)))
     res.unknown_colors = unknown
     res.warnings = list(warnings)
+    # Lines still waiting for the student's colour choice are drawn too (grey), so the part is never blank.
+    waiting = [(pi, it) for pi, it in items if it.key in unknown]
     boxes = []
     for pi in range(len(req.parts)):
-        mine = [it for p, it in kept if p == pi]
+        mine = [it for p, it in kept + waiting if p == pi]
         boxes.append(_round_box(bbox(mine)) if mine else None)
+        paths = [it.pts for p, it in waiting if p == pi]
+        if paths:
+            res.unassigned.append(PartPaths(part=pi, paths=_round(paths)))
     res.part_boxes = boxes
     if unknown:
         res.errors.append("Choose what each colour should do.")

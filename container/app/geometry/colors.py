@@ -25,13 +25,15 @@ def rgb_hex(r: int, g: int, b: int) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-# AutoCAD Color Index: 7 = black/white (black on paper), 1 = red, 5 = blue.
+# DXF: a layer named for its job wins, otherwise the colour AutoCAD draws it in (ACI 7, "black/white", is
+# black on paper, so it cuts). Near-colours follow the same rules as SVG, so ACI 1 and 10 mark, 5 and 150
+# engrave, and 250 (near black) cuts.
 DXF_LAYER_WORDS: dict[str, OpKind] = {"CUT": "cut", "MARK": "score", "SCORE": "score", "ENGRAVE": "engrave"}
 
 
-def classify_dxf(layer: str, aci: int) -> Optional[OpKind]:
+def classify_dxf(layer: str, rgb: tuple[int, int, int]) -> Optional[OpKind]:
     name = layer.upper()
     for word, kind in DXF_LAYER_WORDS.items():
         if word in name:
             return kind
-    return {7: "cut", 1: "score", 5: "engrave"}.get(aci)
+    return classify_rgb(*rgb)

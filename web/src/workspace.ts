@@ -2,7 +2,7 @@
 // Geometry comes from the server. While dragging, the part is moved/scaled locally and the page
 // re-processes when you let go.
 import type { OpKind } from '../../shared/contracts';
-import { OP_COLORS } from './ops';
+import { OP_COLORS, UNSURE } from './ops';
 import { smoothD } from './library';
 import { isDark, onThemeChange } from './theme';
 
@@ -28,6 +28,8 @@ export interface PartView {
   id: number;
   box: Box | null;
   layers: { kind: OpKind; paths: [number, number][][] }[];
+  /** Lines waiting for the student to choose what their colour does (drawn grey, dashed). */
+  unassigned?: [number, number][][];
   sketch?: Sketch;
 }
 
@@ -695,6 +697,16 @@ export class Workspace {
         g.lineWidth = 1.5;
         g.stroke();
       }
+    }
+    if (p.unassigned?.length) {
+      g.beginPath();
+      for (const path of p.unassigned) path.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+      g.save();
+      g.setLineDash([5, 4]);
+      g.strokeStyle = UNSURE;
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.restore();
     }
     if (p.sketch) this.drawSketch(p.sketch, this.liveBox(p)!);
 

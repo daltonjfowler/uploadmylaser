@@ -81,10 +81,12 @@ export interface ProcessRequest {
 }
 
 export interface PreviewLayer { kind: OpKind; part: number; paths: [Mm, Mm][][] }
+export interface PartPaths { part: number; paths: [Mm, Mm][][] }
 
 export interface ProcessResponse {
   preview: PreviewLayer[];                  // bed mm, per part and op, for the canvas
-  partBoxes: ([Mm, Mm, Mm, Mm] | null)[];   // one per request part (null: nothing in it to laser)
+  unassigned: PartPaths[];                  // lines whose colour the student hasn't chosen yet (drawn grey)
+  partBoxes: ([Mm, Mm, Mm, Mm] | null)[];   // one per request part (null: nothing in it to laser or to choose)
   bboxMm: [Mm, Mm, Mm, Mm] | null;          // the whole job
   rd: string | null;       // base64, swizzled, ready to stream
   frameRd: string | null;  // base64, laser-off trace of bbox
