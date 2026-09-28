@@ -1,6 +1,8 @@
 // The projector window, like uploadmycode's /display: polls the phrase every 5 s with the key the
 // teacher page remembered, and shows it as big as the window allows. Click to go full screen.
 
+import { deviceId } from './device';
+
 const KEY_STORAGE = 'uml.teacherKey'; // the entry teacher.ts writes
 const POLL_MS = 5000; // a correct key is never rate limited
 
@@ -70,7 +72,7 @@ async function poll(): Promise<void> {
   }
   polling = true;
   try {
-    const r = await fetch('/api/teacher/phrase', { headers: { 'x-teacher-key': key } });
+    const r = await fetch('/api/teacher/phrase', { headers: { 'x-teacher-key': key, 'x-device-id': deviceId() } });
     const body = await r.json().catch(() => null);
     if (r.ok && body) {
       offline = false;

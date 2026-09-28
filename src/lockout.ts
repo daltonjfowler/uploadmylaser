@@ -1,12 +1,15 @@
-// Growing per-IP lockout on wrong class phrases and wrong teacher keys (Dalton, 2026-09-28): 5 wrong
-// tries in a row lock that IP for 5 s, and each further wrong try after a lock ends doubles it
-// (5, 10, 20, 40, 80, 160, then 300 s at most). A right phrase or key from that IP clears it. While
+// Growing per-DEVICE lockout on wrong class phrases and wrong teacher keys (Dalton, 2026-09-28): 5 wrong
+// tries in a row lock that device for 5 s, and each further wrong try after a lock ends doubles it
+// (5, 10, 20, 40, 80, 160, then 300 s at most). A right phrase or key from that device clears it. While
 // locked, tries are refused WITHOUT comparing, so a locked guesser learns nothing.
 //
-// One counter per (kind, IP), kept in the Cache API: free, no write quota, and per Cloudflare location,
-// which is fine because one IP reaches one location. Every store call falls open: if the cache fails,
-// the Worker behaves as if there were no lockout, so a cache problem never blocks a class. Pure apart
-// from the store and the clock, so test/lockout.test.mjs runs it with an in-memory map.
+// Per device, not per IP: a school shares one public IP, and one student guessing must never lock out
+// the class or the teacher. Pages send a random `x-device-id` (web/src/device.ts); requests without a
+// valid one (only scripts) fall back to the IP. One counter per (kind, device), kept in the Cache API:
+// free, no write quota, and per Cloudflare location, which is fine because one client reaches one
+// location. Every store call falls open: if the cache fails, the Worker behaves as if there were no
+// lockout, so a cache problem never blocks a class. Pure apart from the store and the clock, so
+// test/lockout.test.mjs runs it with an in-memory map.
 
 import { HttpError } from './http.ts';
 
@@ -29,8 +32,17 @@ export interface LockoutStore {
   delete(key: string): Promise<void>;
 }
 
-export function lockoutKey(kind: LockoutKind, ip: string): string {
-  return `https://lockout.internal/${kind}/${encodeURIComponent(ip === '' ? 'unknown' : ip)}`;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// Who a try counts against: `device:<uuid>` when the x-device-id header is a real UUID, else `ip:<ip>`.
+export function lockoutSubject(deviceHeader: string | null, ip: string): string {
+  const id = (deviceHeader ?? '').trim().toLowerCase();
+  if (UUID.test(id)) return 'device:' + id;
+  return 'ip:' + (ip === '' ? 'unknown' : ip);
+}
+
+export function lockoutKey(kind: LockoutKind, who: string): string {
+  return `https://lockout.internal/${kind}/${encodeURIComponent(who)}`;
 }
 
 // How long the Nth wrong try in a row locks for: 0 below the threshold, then doubling to the cap.
@@ -99,10 +111,10 @@ function logCacheError(what: string, e: unknown): void {
 
 // Call BEFORE comparing. Throws the 429 while locked; otherwise returns the counter (null when there
 // is none or the cache failed) to hand to recordWrong / recordRight.
-export async function checkLockout(store: LockoutStore, kind: LockoutKind, ip: string, now: number): Promise<LockoutState | null> {
+export async function checkLockout(store: LockoutStore, kind: LockoutKind, who: string, now: number): Promise<LockoutState | null> {
   let state: LockoutState | null;
   try {
-    state = await store.get(lockoutKey(kind, ip));
+    state = await store.get(lockoutKey(kind, who));
   } catch (e) {
     logCacheError('read', e);
     return null;
@@ -112,10 +124,10 @@ export async function checkLockout(store: LockoutStore, kind: LockoutKind, ip: s
   return state;
 }
 
-export async function recordWrong(store: LockoutStore, kind: LockoutKind, ip: string, prior: LockoutState | null, now: number): Promise<LockoutState> {
+export async function recordWrong(store: LockoutStore, kind: LockoutKind, who: string, prior: LockoutState | null, now: number): Promise<LockoutState> {
   const next = afterFailure(prior, now);
   try {
-    await store.put(lockoutKey(kind, ip), next);
+    await store.put(lockoutKey(kind, who), next);
   } catch (e) {
     logCacheError('write', e);
   }
@@ -123,10 +135,10 @@ export async function recordWrong(store: LockoutStore, kind: LockoutKind, ip: st
 }
 
 // Only touches the cache when there was something to clear, so right answers cost one read.
-export async function recordRight(store: LockoutStore, kind: LockoutKind, ip: string, prior: LockoutState | null): Promise<void> {
+export async function recordRight(store: LockoutStore, kind: LockoutKind, who: string, prior: LockoutState | null): Promise<void> {
   if (!prior) return;
   try {
-    await store.delete(lockoutKey(kind, ip));
+    await store.delete(lockoutKey(kind, who));
   } catch (e) {
     logCacheError('delete', e);
   }

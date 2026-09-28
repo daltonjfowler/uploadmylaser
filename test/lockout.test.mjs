@@ -1,15 +1,17 @@
-// The growing per-IP lockout on wrong class phrases and teacher keys.
+// The growing per-device lockout on wrong class phrases and teacher keys.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { HttpError } from '../src/http.ts';
 import {
   afterFailure, cacheStore, checkLockout, LOCKOUT_CACHE_SECONDS, LOCKOUT_FREE_TRIES, LOCKOUT_MAX_SECONDS, lockoutKey,
-  lockSecondsFor, recordRight, recordWrong, retryAfterSeconds,
+  lockoutSubject, lockSecondsFor, recordRight, recordWrong, retryAfterSeconds,
 } from '../src/lockout.ts';
 
 const T0 = 5_000_000;
 const IP = '203.0.113.7';
+const DEV_A = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const DEV_B = '9b2c7a10-1d2e-4c3f-8a4b-5c6d7e8f9a0b';
 
 // In-memory stand-in for the Cache API store.
 function memStore() {
@@ -29,9 +31,9 @@ const brokenStore = {
 };
 
 // One wrong try the way the Worker does it: check, then (not locked) compare fails, then record.
-async function wrongTry(store, kind, now) {
-  const prior = await checkLockout(store, kind, IP, now);
-  return recordWrong(store, kind, IP, prior, now);
+async function wrongTry(store, kind, now, who = IP) {
+  const prior = await checkLockout(store, kind, who, now);
+  return recordWrong(store, kind, who, prior, now);
 }
 
 function isLocked(seconds) {
@@ -142,5 +144,27 @@ test('cacheStore round-trips through a Cache-shaped object with a max-age', asyn
   assert.deepEqual(await store.get(key), { failures: 5, lockedUntil: T0 });
   await store.delete(key);
   assert.equal(await store.get(key), null);
-  assert.equal(lockoutKey('phrase', ''), 'https://lockout.internal/phrase/unknown');
+  assert.equal(lockoutKey('phrase', lockoutSubject(null, '')), 'https://lockout.internal/phrase/ip%3Aunknown');
+});
+
+test('two devices on the same IP are independent', async () => {
+  const s = memStore();
+  const a = lockoutSubject(DEV_A, IP);
+  const b = lockoutSubject(DEV_B, IP);
+  assert.equal(a, 'device:' + DEV_A);
+  for (let i = 0; i < 5; i++) await wrongTry(s, 'phrase', T0, a);
+  await assert.rejects(checkLockout(s, 'phrase', a, T0 + 1), isLocked(5));
+  assert.equal(await checkLockout(s, 'phrase', b, T0 + 1), null); // B on the same school IP is untouched
+  assert.equal(await checkLockout(s, 'teacher', a, T0 + 1), null); // and so is A's teacher counter
+  assert.equal(await checkLockout(s, 'phrase', lockoutSubject(null, IP), T0 + 1), null); // and the IP key
+});
+
+test('the device id is lowercased; a missing or garbage id falls back to the IP', () => {
+  assert.equal(lockoutSubject(DEV_A.toUpperCase(), IP), 'device:' + DEV_A);
+  assert.equal(lockoutSubject(` ${DEV_A} `, IP), 'device:' + DEV_A);
+  for (const bad of [null, '', 'hello', DEV_A + 'x', DEV_A.replace(/-/g, ''), '3f2504e0-4f89-41d3-9a0c-0305e82c330g', `${DEV_A}
+${DEV_B}`]) {
+    assert.equal(lockoutSubject(bad, IP), 'ip:' + IP, String(bad));
+  }
+  assert.equal(lockoutSubject(null, ''), 'ip:unknown');
 });

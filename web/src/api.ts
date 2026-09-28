@@ -1,4 +1,5 @@
 import type { ProcessRequest, ProcessResponse, PublicMaterial } from '../../shared/contracts';
+import { deviceId } from './device';
 
 export interface PublicMachine {
   bedWidthMm: number;
@@ -52,7 +53,7 @@ export function setPhrase(p: string): void {
 }
 
 export async function checkPhrase(p: string): Promise<void> {
-  await call('/api/phrase/check', { method: 'POST', headers: { 'x-class-phrase': p } });
+  await call('/api/phrase/check', { method: 'POST', headers: { 'x-class-phrase': p, 'x-device-id': deviceId() } });
 }
 
 /** A random id per Chromebook, so the server's rate limit counts each student separately
@@ -78,6 +79,6 @@ export async function processDesign(req: ProcessRequest, files: Blob[]): Promise
   return call<ProcessResponse>('/api/process', {
     method: 'POST',
     body: fd,
-    headers: { 'x-class-phrase': getPhrase(), 'x-client-id': clientId() },
+    headers: { 'x-class-phrase': getPhrase(), 'x-client-id': clientId(), 'x-device-id': deviceId() },
   });
 }

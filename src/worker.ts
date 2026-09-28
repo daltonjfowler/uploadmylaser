@@ -7,8 +7,8 @@
 // Safety rule: power/speed only ever come from KV (teacher presets). Student requests carry a
 // materialId and nothing else that affects the laser beam (src/process-request.ts).
 //
-// Gate order for POST /api/process: size → school CIDR lock → per-IP limit → wrong-try lockout
-// (src/lockout.ts, also on the teacher key) → class phrase →
+// Gate order for POST /api/process: size → school CIDR lock → per-IP limit → per-device wrong-try
+// lockout (src/lockout.ts, also on the teacher key) → class phrase →
 // rate limits → strict validation → container. The per-IP limit (src/ip-limit.ts) comes before
 // the phrase so phrases cannot be guessed without limit; it equals the site-wide limit because a
 // school shares one public IP. The other limits run after the phrase so wrong guesses never spend
@@ -23,7 +23,7 @@ import { constantTimeEquals } from './constant-time.ts';
 import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
 import { checkIpLimit } from './ip-limit.ts';
-import { cacheStore, checkLockout, recordRight, recordWrong, type LockoutStore } from './lockout.ts';
+import { cacheStore, checkLockout, lockoutSubject, recordRight, recordWrong, type LockoutStore } from './lockout.ts';
 import {
   activeRecord, clampTtlMinutes, isUsablePhrase, normalizePhrase, PHRASE_KEY, phraseLengthMessage, type PhraseRecord,
 } from './phrase.ts';
@@ -284,27 +284,27 @@ function countersStub(env: Env): DurableObjectStub<Counters> {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-// The per-IP wrong-try lockout (src/lockout.ts) lives in this colo's cache. Falls open on any cache error.
+// The per-device wrong-try lockout (src/lockout.ts) lives in this colo's cache. Falls open on any cache error.
 function lockoutStore(): LockoutStore {
   return cacheStore(caches.default);
 }
 
-// The per-IP lockout runs first (Dalton, 2026-09-28: 5 wrong tries lock that IP, growing), and a
-// locked IP is refused before any compare. Past that, the key is compared before the site-wide
+// The per-device lockout runs first (Dalton, 2026-09-28: 5 wrong tries lock that device, growing), and
+// a locked device is refused before any compare. Past that, the key is compared before the site-wide
 // guard, so the guard never refuses a correct key; only a wrong key touches it. No secret uploaded
 // means no teacher endpoint at all: never fall open.
 async function teacherGate(req: Request, env: Env): Promise<void> {
-  const ip = req.headers.get('cf-connecting-ip') ?? '';
+  const who = lockoutSubject(req.headers.get('x-device-id'), req.headers.get('cf-connecting-ip') ?? '');
   const store = lockoutStore();
-  const prior = await checkLockout(store, 'teacher', ip, Date.now());
+  const prior = await checkLockout(store, 'teacher', who, Date.now());
   const expected = env.TEACHER_KEY ?? '';
   if (expected === '') console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
   else if (await constantTimeEquals(req.headers.get('x-teacher-key') ?? '', expected)) {
-    await recordRight(store, 'teacher', ip, prior);
+    await recordRight(store, 'teacher', who, prior);
     return;
   }
 
-  await recordWrong(store, 'teacher', ip, prior, Date.now());
+  await recordWrong(store, 'teacher', who, prior, Date.now());
   const guard = await countersStub(env).recordWrongTeacherKey();
   await sleep(TEACHER_REJECT_DELAY_MS);
   if (guard.locked) {
@@ -315,21 +315,21 @@ async function teacherGate(req: Request, env: Env): Promise<void> {
   throw new HttpError(401, 'Wrong teacher key.');
 }
 
-// Runs after the per-IP fuse. The per-IP lockout is checked before the compare, so a locked IP is
+// Runs after the per-IP fuse. The per-device lockout is checked before the compare, so a locked device is
 // refused (429 'locked') without comparing; a wrong phrase itself is still a plain 401, so the page
-// forgets a stale phrase. A right phrase clears that IP's count. Compared in constant time.
+// forgets a stale phrase. A right phrase clears that device's count. Compared in constant time.
 async function checkPhrase(req: Request, env: Env): Promise<void> {
-  const ip = req.headers.get('cf-connecting-ip') ?? '';
+  const who = lockoutSubject(req.headers.get('x-device-id'), req.headers.get('cf-connecting-ip') ?? '');
   const store = lockoutStore();
-  const prior = await checkLockout(store, 'phrase', ip, Date.now());
+  const prior = await checkLockout(store, 'phrase', who, Date.now());
   const rec = await readActivePhrase(env);
   if (!rec) throw new HttpError(403, 'The laser is closed. Ask your teacher for today\'s class phrase.');
   const got = normalizePhrase(req.headers.get('x-class-phrase') ?? '');
   if (!(await constantTimeEquals(got, rec.phrase))) {
-    await recordWrong(store, 'phrase', ip, prior, Date.now());
+    await recordWrong(store, 'phrase', who, prior, Date.now());
     throw new HttpError(401, 'That class phrase is not right.');
   }
-  await recordRight(store, 'phrase', ip, prior);
+  await recordRight(store, 'phrase', who, prior);
 }
 
 // ALLOWED_CIDRS parsed once per isolate (config, not request data, so module scope is safe).

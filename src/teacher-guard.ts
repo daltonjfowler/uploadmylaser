@@ -1,6 +1,7 @@
 // The site-wide guard on the teacher key: a coarse ceiling on WRONG keys from everybody together
-// (a port of uploadmycode's). Since 2026-09-28 there is also a short, growing per-IP lockout in front
-// of the compare (src/lockout.ts, Dalton's call); it caps at 5 minutes, and a right key clears it.
+// (a port of uploadmycode's). No per-IP penalty: a school shares one public IP, so one student must
+// never be able to lock out the teacher or the class. In front of the compare there is also a short,
+// growing lockout per DEVICE (src/lockout.ts, keyed by x-device-id); it only ever locks the guesser.
 //
 //   more than 100 wrong keys from everyone inside 15 minutes
 //     -> wrong keys get 429 for the next 15 minutes

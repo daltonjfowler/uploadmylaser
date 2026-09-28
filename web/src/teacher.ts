@@ -2,6 +2,7 @@
 // display and a pop-out window), then the laser's materials and machine settings.
 import type { MachineConfig, Material, OpKind, OpSettings } from '../../shared/contracts';
 import { MAX_PHRASE_LENGTH } from '../../shared/contracts';
+import { deviceId } from './device';
 import { OP_LABELS } from './ops';
 import { generatePhrase } from './phrase-words';
 import { initThemeButton } from './theme';
@@ -29,7 +30,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   try {
     r = await fetch(path, {
       method,
-      headers: { 'x-teacher-key': key(), ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { 'x-teacher-key': key(), 'x-device-id': deviceId(), ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
