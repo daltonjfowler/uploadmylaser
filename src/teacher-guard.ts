@@ -1,14 +1,14 @@
-// The one guard on the teacher key: a coarse ceiling on WRONG keys from everybody together
-// (a port of uploadmycode's). No per-IP lockouts: a school shares one public IP, so a per-IP
-// penalty would let one student lock out the whole class, or the teacher.
+// The site-wide guard on the teacher key: a coarse ceiling on WRONG keys from everybody together
+// (a port of uploadmycode's). Since 2026-09-28 there is also a short, growing per-IP lockout in front
+// of the compare (src/lockout.ts, Dalton's call); it caps at 5 minutes, and a right key clears it.
 //
 //   more than 100 wrong keys from everyone inside 15 minutes
 //     -> wrong keys get 429 for the next 15 minutes
 //     -> a CORRECT key always works (the Worker compares the key first and only asks this guard
 //        about keys that were already wrong)
 //
-// Compare-first and no per-IP limit ON PURPOSE (unlike the class phrase): the key is 192-bit random, so
-// guessing is hopeless anyway, and a limit could let someone on the shared school IP lock the teacher out.
+// This guard is compare-first ON PURPOSE: the key is 192-bit random, so guessing is hopeless anyway,
+// and a long site-wide lock must never keep the teacher out.
 //
 // Lives in the Counters Durable Object, in memory. Pure apart from the clock.
 

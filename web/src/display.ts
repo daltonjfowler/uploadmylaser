@@ -83,6 +83,8 @@ async function poll(): Promise<void> {
         expiresAt = 0;
         ended = 'Students cannot use the laser right now.';
       }
+    } else if (r.status === 429 && body?.error === 'locked') {
+      offline = true; // this network is briefly locked out; keep the phrase on screen and poll again
     } else if (r.status === 401 || r.status === 403 || r.status === 429) {
       offline = false;
       state = 'nokey';

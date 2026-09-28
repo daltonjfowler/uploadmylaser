@@ -20,7 +20,9 @@ export class ApiError extends Error {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, init);
   const body = await r.json().catch(() => ({ error: `Server error ${r.status}` }));
-  if (!r.ok) throw new ApiError(r.status, body.error ?? `Server error ${r.status}`);
+  // A 429 'locked' (too many wrong tries from this network) carries its sentence in `message`.
+  const msg = body.error === 'locked' && typeof body.message === 'string' ? body.message : body.error;
+  if (!r.ok) throw new ApiError(r.status, msg ?? `Server error ${r.status}`);
   return body as T;
 }
 

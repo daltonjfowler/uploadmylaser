@@ -11,6 +11,8 @@ anything not marked verified there as a guess.
   `ruida/` (swizzle, encoder, decoder), `pipeline.py` wires it together. `runner.py` runs each job in a
   worker process that is killed after 25 s, and importers share a point budget (`PointBudget`), because one
   container serves the whole school.
+- `src/lockout.ts`: per-IP wrong-try lockout on the class phrase and teacher key (5 wrong in a row lock 5 s,
+  doubling to 300 s; right answer clears; Cache API, falls open on cache errors; checked before the compare).
 - `web/`: Vite multi-page (index, teacher/, display/). `serial-test.html` is dev-only and must stay
   OUT of the production build (it sends raw bytes to the laser). No framework. Keep the bundle small, since
   Chromebooks are slow. `workspace.ts` is the canvas, `main.ts` the app state, `shapes.ts` draws Box/Circle as SVG.

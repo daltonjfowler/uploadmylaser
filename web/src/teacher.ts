@@ -37,7 +37,9 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 || r.status === 403) throw new ApiError(r.status, 'That teacher key was refused. Check it and try again.');
-  // 429 only ever comes from the site-wide wrong-key guard; its sentence carries the wait.
+  // 429 comes from the site-wide wrong-key guard (sentence in `error`) or the per-IP lockout
+  // (`error: 'locked'`, sentence in `message`); both sentences carry the wait.
+  if (r.status === 429 && j.error === 'locked' && typeof j.message === 'string') throw new ApiError(r.status, j.message);
   if (!r.ok) throw new ApiError(r.status, j.error ?? `Something went wrong (${r.status}).`);
   return j as T;
 }
