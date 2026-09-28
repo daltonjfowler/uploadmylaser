@@ -26,7 +26,7 @@ export function isUsablePhrase(norm: string): boolean {
 }
 
 export function phraseLengthMessage(): string {
-  return `The phrase needs at least ${MIN_PHRASE_LENGTH} characters (at most ${MAX_PHRASE_LENGTH}) so students outside the class cannot guess it. Press Generate for a good one.`;
+  return `The phrase needs ${MIN_PHRASE_LENGTH} to ${MAX_PHRASE_LENGTH} characters.`;
 }
 
 // Missing or junk becomes the default rather than an error; the response echoes what was set.

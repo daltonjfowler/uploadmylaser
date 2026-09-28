@@ -96,9 +96,10 @@ export interface ProcessResponse {
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // all files in one request together
 export const MAX_PARTS = 100; // room for patterns (copies of one file share its fileIndex)
-// Class phrases (src/phrase.ts). Long enough that guessing is hopeless at the per-IP limit; generated
-// phrases (web/src/phrase-words.ts) are always longer.
-export const MIN_PHRASE_LENGTH = 12;
+// Class phrases (src/phrase.ts). A teacher's own phrase can be any length (Dalton's call,
+// 2026-09-28): a short one is the teacher's choice, and the per-IP limit still slows guessing.
+// Generated phrases (web/src/phrase-words.ts) are long and hard to guess.
+export const MIN_PHRASE_LENGTH = 1;
 export const MAX_PHRASE_LENGTH = 64;
 
 /** Fonts for the Text tool. Ids must match FONTS in container/app/geometry/text_import.py.

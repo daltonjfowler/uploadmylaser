@@ -1,7 +1,7 @@
 // Teacher page, in the same flow as uploadmycode's: the key, today's phrase (with a projector
 // display and a pop-out window), then the laser's materials and machine settings.
 import type { MachineConfig, Material, OpKind, OpSettings } from '../../shared/contracts';
-import { MIN_PHRASE_LENGTH } from '../../shared/contracts';
+import { MAX_PHRASE_LENGTH } from '../../shared/contracts';
 import { OP_LABELS } from './ops';
 import { generatePhrase } from './phrase-words';
 import { initThemeButton } from './theme';
@@ -130,8 +130,8 @@ $('generate').onclick = () => {
 $('set').onclick = async () => {
   const phrase = phraseInput.value.trim();
   if (!phrase) return say('Type a phrase, or press Generate.', 'error');
-  if (normalize(phrase).length < MIN_PHRASE_LENGTH) {
-    return say(`The phrase needs at least ${MIN_PHRASE_LENGTH} characters so students outside the class cannot guess it. Press Generate for a good one.`, 'error');
+  if (normalize(phrase).length > MAX_PHRASE_LENGTH) {
+    return say(`The phrase can be at most ${MAX_PHRASE_LENGTH} characters.`, 'error');
   }
   const ttlMinutes = Number($<HTMLSelectElement>('duration').value);
   // Ask the server what is live rather than trusting this page: another teacher, in another

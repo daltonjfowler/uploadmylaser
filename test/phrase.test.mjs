@@ -14,14 +14,17 @@ test('normalizePhrase trims, lowercases and collapses spaces', () => {
   assert.equal(normalizePhrase(42), '');
 });
 
-test('isUsablePhrase: 12 to 64 characters', () => {
-  assert.equal(MIN_PHRASE_LENGTH, 12);
-  assert.equal(isUsablePhrase('robot'), false);
-  assert.equal(isUsablePhrase('x'.repeat(11)), false);
-  assert.equal(isUsablePhrase('x'.repeat(12)), true);
+test("isUsablePhrase: any length from 1 to 64 characters (Dalton's call)", () => {
+  assert.equal(MIN_PHRASE_LENGTH, 1);
+  assert.equal(isUsablePhrase(''), false);
+  assert.equal(isUsablePhrase(normalizePhrase('   ')), false);
+  assert.equal(isUsablePhrase('7'), true);
+  assert.equal(isUsablePhrase(normalizePhrase('  Cat ')), true);
+  assert.equal(isUsablePhrase('robot'), true);
   assert.equal(isUsablePhrase('x'.repeat(64)), true);
   assert.equal(isUsablePhrase('x'.repeat(65)), false);
-  assert.match(phraseLengthMessage(), /at least 12 characters/);
+  assert.match(phraseLengthMessage(), /needs 1 to 64 characters/);
+  assert.doesNotMatch(phraseLengthMessage(), /guess/);
 });
 
 test('generated phrases: three different words and a 2-digit number, always long enough', () => {
@@ -65,7 +68,7 @@ test('activeRecord refuses an expired record even if KV still returns it', () =>
 });
 
 test('activeRecord refuses junk', () => {
-  for (const v of [null, 'blue robot pancake', 7, {}, { phrase: 'blue robot pancake' }, { phrase: 'robots', expiresAt: 9e15 },
+  for (const v of [null, 'blue robot pancake', 7, {}, { phrase: 'blue robot pancake' }, { phrase: '', expiresAt: 9e15 }, { phrase: 'x'.repeat(65), expiresAt: 9e15 },
     { phrase: 'blue robot pancake', expiresAt: '9999999999999' }, { phrase: 'blue robot pancake', expiresAt: NaN }]) {
     assert.equal(activeRecord(v, 1000), null, JSON.stringify(v));
   }
