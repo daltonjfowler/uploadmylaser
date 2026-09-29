@@ -481,9 +481,10 @@ function ungroup(): void {
     xMm: round(pc.box[2]), yMm: round(pc.box[1]), scale: 1, rotateDeg: 0, // top-right corner, like every part
   }));
   parts.splice(parts.indexOf(p), 1, ...made);
-  notes = [`Split into ${made.length} pieces. They are all selected: click one to move it alone.`];
+  // nothing selected afterwards: with every piece selected they move as one and look still grouped
+  select(null);
   changed();
-  setGroup(made.map((q) => q.id));
+  warn(`Split into ${made.length} pieces. Click a piece to move or delete it on its own.`, '✓');
 }
 $('selectAll').onclick = selectAll;
 $('zoomIn').onclick = () => ws.zoomBy(1.3);
@@ -1478,10 +1479,10 @@ document.addEventListener('keydown', (e) => {
 
 let toastTimer = 0;
 /** A warning the student can't miss: on the bed for a few seconds, and in the Laser panel. */
-function warn(text: string): void {
+function warn(text: string, mark = '⚠'): void {
   notes = [text];
   const t = $('toast');
-  t.textContent = `⚠ ${text}`;
+  t.textContent = `${mark} ${text}`;
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => { t.hidden = true; }, 6000);
