@@ -8,6 +8,7 @@ import math
 from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .geometry.hatch import hatch
 from .geometry.order import nearest_neighbour, order_cuts
+from .geometry.photo_import import PHOTO_KEY
 from .geometry.shapes_ops import outline, weld
 from .geometry.transform import bbox, place
 from .models import ContainerJob, FilePart, OpKind, OpSettings, Part, PartColor, PartPaths, PreviewLayer, ProcessResponse
@@ -43,6 +44,9 @@ def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings
     except (binascii.Error, ValueError) as e:
         raise ValueError(f'The file for "part {n}" got damaged on upload. Try again.') from e
     try:
+        if part.file_type == "pbm":
+            from .geometry.photo_import import import_photo
+            return import_photo(data, warnings, budget=budget)
         if part.file_type == "svg":
             from .geometry.svg_import import import_svg
             return import_svg(data, warnings, budget=budget)
@@ -141,6 +145,8 @@ def process(job: ContainerJob) -> ProcessResponse:
         if choice == "ignore":
             continue
         kind = choice or it.kind
+        if kind == "cut" and it.key == PHOTO_KEY:
+            kind = "engrave"  # cutting a photo's dots would slice the board into strips
         if kind is None:
             if it.key not in unknown:
                 unknown.append(it.key)
@@ -199,11 +205,13 @@ def process(job: ContainerJob) -> ProcessResponse:
             continue
         s = clamp_settings(apply_power_choice(mat.ops[kind], req.power_choice.get(kind)), m)
         if kind == "engrave":
-            closed = [i for _, i in group if i.closed]
-            if len(closed) < len(group):
+            photo = [i for _, i in group if i.key == PHOTO_KEY]  # already the fill: rows of dots
+            rest = [i for _, i in group if i.key != PHOTO_KEY]
+            closed = [i for i in rest if i.closed]
+            if len(closed) < len(rest):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
-            paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed])
-            shown = [i.pts for i in closed]
+            paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed]) + [i.pts for i in photo]
+            shown = [i.pts for i in closed] + [i.pts for i in photo]
         elif off_bed:
             paths, shown = [], [i.pts for _, i in group]
         elif kind == "score":

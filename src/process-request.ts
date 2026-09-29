@@ -104,7 +104,7 @@ function validatePart(p: unknown, n: number, fileFields: ReadonlySet<number>): P
     if (typeof fileIndex !== 'number' || !Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= MAX_PARTS || !fileFields.has(fileIndex)) {
       bad(`The file for part ${n} is missing. Try adding it again.`);
     }
-    if (fileType !== 'svg' && fileType !== 'dxf') bad(`Part ${n} must be an SVG or DXF file.`);
+    if (fileType !== 'svg' && fileType !== 'dxf' && fileType !== 'pbm') bad(`Part ${n} must be an SVG or DXF file, or a photo.`);
     const colorMap = validateColorMap(p.colorMap);
     return { kind: 'file', fileIndex, fileType, ...placement, ...(colorMap ? { colorMap } : {}) };
   }

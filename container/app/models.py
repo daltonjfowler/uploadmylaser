@@ -80,7 +80,7 @@ class FilePart(Placement):
     outline: Optional[OutlineSpec] = None
     kind: Literal["file"] = "file"
     file_index: int = Field(ge=0)
-    file_type: Literal["svg", "dxf"]
+    file_type: Literal["svg", "dxf", "pbm"]  # pbm: a photo, already black and white dots
     color_map: dict[str, ColorChoice] = {}  # this file's own choices, ahead of ProcessRequest.color_map
 
 

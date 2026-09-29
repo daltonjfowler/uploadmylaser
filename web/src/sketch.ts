@@ -5,12 +5,14 @@ import type { ColorChoice, OpKind, PartExtras, Placement, TextSpec } from '../..
 import { TEXT_FONTS } from '../../shared/contracts';
 import { OP_COLORS, UNSURE } from './ops';
 import { sketchDxf, type DxfSketch } from './dxf';
+import { pbmSize } from './photo';
 import type { ShapeKind, ViewBox } from './shapes';
 import type { Box, PartView } from './workspace';
 
 export type Source =
   /** colors: the student's choice per colour key (replaced, never changed in place: Undo shares it) */
-  | { kind: 'file'; name: string; fileType: 'svg' | 'dxf'; data: string; colors?: Record<string, ColorChoice> }
+  /** pbm: a photo as dots (data), with a small picture of the dots (preview, a data URL) to draw locally */
+  | { kind: 'file'; name: string; fileType: 'svg' | 'dxf' | 'pbm'; data: string; colors?: Record<string, ColorChoice>; preview?: string }
   | { kind: 'text'; text: TextSpec }
   | { kind: 'shape'; shape: ShapeKind; wMm: number; hMm: number; op: OpKind }
   /** Library shapes and the Line/Curve tools: an SVG path stretched from its bounds `vb` to wMm x hMm. */
@@ -31,7 +33,16 @@ function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => vo
   if (cached && cached.data === p.source.data) return cached;
   const { data, fileType } = p.source;
   let info: FileInfo = { data, w: 50, h: 50, img: null, dxf: null, known: false };
-  if (fileType === 'svg') {
+  if (fileType === 'pbm') {
+    const size = pbmSize(data);
+    if (size) info = { ...info, w: size[0], h: size[1], known: true };
+    if (p.source.preview) {
+      const img = new Image();
+      img.onload = onLoad;
+      img.src = p.source.preview;
+      info.img = img;
+    }
+  } else if (fileType === 'svg') {
     const size = svgSize(data);
     if (size) info = { ...info, w: size[0], h: size[1], known: true };
     const img = new Image();

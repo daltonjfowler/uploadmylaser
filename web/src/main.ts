@@ -20,6 +20,7 @@ import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
 import { zip } from './zip';
 import { boxPanels, outsideSize } from './boxmaker';
+import { runCount, toDots, toPbm } from './photo';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -425,7 +426,7 @@ function readDesign(text: string): { parts: DesignPart[]; materialId: string; co
     const s = q?.source as Record<string, unknown> | undefined;
     return !!q && typeof q.id === 'number' && [q.xMm, q.yMm, q.scale].every((v) => typeof v === 'number' && Number.isFinite(v))
       && [0, 90, 180, 270].includes(q.rotateDeg as number) && !!s && ['file', 'text', 'shape', 'path'].includes(s.kind as string)
-      && (s.kind !== 'file' || (typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf')));
+      && (s.kind !== 'file' || (typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf' || s.fileType === 'pbm')));
   };
   const ps = o.parts.filter(okPart).slice(0, MAX_PARTS);
   if (!ps.length) return null;
@@ -457,6 +458,13 @@ function placeDesign(d: NonNullable<ReturnType<typeof readDesign>>, replace: boo
 }
 
 async function openAny(f: File, replace: boolean): Promise<void> {
+  if (/^image\/(png|jpe?g|webp|gif|bmp)$/.test(f.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)) {
+    const src = await photoDialog(f);
+    if (!src) return;
+    if (replace) { parts = []; colorMap = {}; result = null; resultIds = []; }
+    addPart(src);
+    return;
+  }
   if (f.name.toLowerCase().endsWith(DESIGN_EXT)) {
     if (f.size > MAX_UPLOAD_BYTES * 2) return warn('That design file is too big.');
     const d = readDesign(await f.text());
@@ -699,7 +707,8 @@ function select(id: number | null): void {
 
 function canUngroup(): boolean {
   const ids = selection();
-  return ids.some((id) => find(id)?.groupId !== undefined) || (ids.length === 1 && find(ids[0])?.source.kind === 'file');
+  const one = ids.length === 1 ? find(ids[0])?.source : undefined;
+  return ids.some((id) => find(id)?.groupId !== undefined) || (one?.kind === 'file' && one.fileType !== 'pbm');
 }
 
 function renderSelectButtons(): void {
@@ -1327,9 +1336,9 @@ function renderColors(): void {
     if (swatch?.startsWith('#')) sw.style.background = swatch;
     else if (now && now !== 'ignore') sw.style.background = OP_COLORS[now];
     const label = document.createElement('span');
-    label.textContent = kind === 'dxf' ? `Layer "${value}"` : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
+    label.textContent = kind === 'dxf' ? `Layer "${value}"` : kind === 'photo' ? 'Photo' : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
     div.append(sw, label);
-    for (const choice of [...ops, 'ignore'] as ColorChoice[]) {
+    for (const choice of [...ops.filter((o) => kind !== 'photo' || o !== 'cut'), 'ignore'] as ColorChoice[]) {
       const btn = document.createElement('button');
       btn.className = 'small' + (choice === now ? ' on' : '');
       btn.setAttribute('aria-pressed', String(choice === now));
@@ -1629,6 +1638,82 @@ function readMaterial(): void {
 for (const id of ['myMatW', 'myMatH']) $(id).addEventListener('change', readMaterial);
 $('myMatClear').onclick = () => { $<HTMLInputElement>('myMatW').value = ''; $<HTMLInputElement>('myMatH').value = ''; readMaterial(); };
 
+// ---------- photo (beta) ----------
+
+const MAX_PHOTO_LINES = 60_000; // the server's point budget, with room to spare
+
+/** Show the Photo window for an image; resolves to the photo part, or null if cancelled. */
+function photoDialog(f: File): Promise<Source | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onerror = () => { URL.revokeObjectURL(url); warn('That picture could not be opened. Try a PNG or JPG.'); resolve(null); };
+    img.onload = () => {
+      let made: { data: string; preview: string; lines: number } | null = null;
+      const redraw = () => { made = drawPhoto(img); };
+      const form = $<HTMLFormElement>('photoForm');
+      const done = (src: Source | null) => {
+        $('photoDlg').hidden = true;
+        form.oninput = null;
+        form.onsubmit = null;
+        $('phCancel').onclick = null;
+        URL.revokeObjectURL(url);
+        resolve(src);
+      };
+      form.oninput = redraw;
+      form.onsubmit = (ev) => {
+        ev.preventDefault();
+        if (!made) return;
+        if (made.lines > MAX_PHOTO_LINES) return;
+        done({ kind: 'file', name: f.name.replace(/\.[^.]*$/, '') + ' (photo)', fileType: 'pbm', data: made.data, preview: made.preview });
+      };
+      $('phCancel').onclick = () => done(null);
+      $('photoDlg').hidden = false;
+      redraw();
+    };
+    img.src = url;
+  });
+}
+
+/** The picture at the chosen size and detail, as dots: draws the preview and returns the PBM. */
+function drawPhoto(img: HTMLImageElement): { data: string; preview: string; lines: number } {
+  const wMm = clamp(Number($<HTMLInputElement>('phW').value) || 60, 10, 200);
+  const mm = Number($<HTMLSelectElement>('phRes').value) || 0.2;
+  const hMm = Math.min(200, (wMm * img.naturalHeight) / Math.max(img.naturalWidth, 1));
+  const w = Math.max(1, Math.round(wMm / mm));
+  const h = Math.max(1, Math.round(hMm / mm));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  g.fillStyle = '#fff'; // see-through parts of a PNG are paper, not black
+  g.fillRect(0, 0, w, h);
+  g.drawImage(img, 0, 0, w, h);
+  const px = g.getImageData(0, 0, w, h).data;
+  const grey = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) grey[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+  const dots = toDots(grey, w, h, {
+    brightness: Number($<HTMLInputElement>('phB').value), contrast: Number($<HTMLInputElement>('phC').value),
+    invert: $<HTMLInputElement>('phInv').checked, mode: $<HTMLSelectElement>('phMode').value === 'threshold' ? 'threshold' : 'dither',
+  });
+  const out = g.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const v = dots[i] ? 30 : 255; // dark dots on light wood
+    out.data.set([v, v, v * (dots[i] ? 1 : 0.93), 255], i * 4);
+  }
+  g.putImageData(out, 0, 0);
+  const prev = $<HTMLCanvasElement>('photoPrev');
+  prev.width = w;
+  prev.height = h;
+  prev.getContext('2d')!.putImageData(out, 0, 0);
+  const lines = runCount(dots, w, h);
+  $('phInfo').textContent = lines > MAX_PHOTO_LINES
+    ? `Too detailed (${lines.toLocaleString()} lines). Make it smaller, pick Fast, or use Black and white.`
+    : `${Math.round(wMm)} × ${Math.round(hMm)} mm, ${lines.toLocaleString()} engrave lines. Engraves with your material's Engrave setting.`;
+  $<HTMLButtonElement>('phAdd').disabled = lines > MAX_PHOTO_LINES;
+  return { data: toPbm(dots, w, h, mm), preview: c.toDataURL('image/png'), lines };
+}
+
 // ---------- box maker ----------
 
 function boxSpecFromForm() {
@@ -1791,8 +1876,9 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
       let fileIndex = fileOf.get(data);
       if (fileIndex === undefined) { // pattern copies share one upload
         const dxf = s.kind === 'file' && s.fileType === 'dxf';
-        const body = dxf && dxfFlavour(data.slice(0, 32)) === 'binary' ? binaryStringToBytes(data) : data;
-        fileIndex = files.push(new Blob([body as BlobPart], { type: dxf ? 'application/dxf' : 'image/svg+xml' })) - 1;
+        const pbm = s.kind === 'file' && s.fileType === 'pbm';
+        const body = pbm || (dxf && dxfFlavour(data.slice(0, 32)) === 'binary') ? binaryStringToBytes(data) : data;
+        fileIndex = files.push(new Blob([body as BlobPart], { type: pbm ? 'image/x-portable-bitmap' : dxf ? 'application/dxf' : 'image/svg+xml' })) - 1;
         fileOf.set(data, fileIndex);
       }
       if (s.kind === 'shape' || s.kind === 'path') { pl.scale = 1; delete pl.scaleY; }

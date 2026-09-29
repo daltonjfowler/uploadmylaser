@@ -77,7 +77,8 @@ export interface TextSpec { value: string; font: TextFontId; heightMm: number; o
  *  Boxes and circles are drawn by the browser as small SVG files. */
 export type Part = Placement & PartExtras & (
   // colorMap: this file's own colour choices, ahead of the request-wide one (so Box/Circle are never touched)
-  | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf'; colorMap?: Record<string, ColorChoice> }
+  // pbm: a photo the browser turned into black and white dots (binary PBM with a size comment)
+  | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf' | 'pbm'; colorMap?: Record<string, ColorChoice> }
   | { kind: 'text'; text: TextSpec }
 );
 

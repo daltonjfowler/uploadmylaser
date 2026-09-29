@@ -10,6 +10,7 @@ from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import unary_union
 
 from . import Item, Pt
+from .photo_import import PHOTO_KEY
 
 OUTLINE_KEY = "outline"
 RING_WALL_MM = 3.0  # wood around a keyring hole
@@ -65,8 +66,14 @@ def weld(items: list[Item]) -> list[Item]:
 
 def outline(items: list[Item], dist_mm: float, hole_mm: float = 0.0) -> list[Item]:
     """A cut line `dist_mm` outside everything in the part; with `hole_mm`, a keyring hole on its left."""
+    photo = [pt for it in items if it.key == PHOTO_KEY for pt in it.pts]
+    items = [it for it in items if it.key != PHOTO_KEY]
     parts = _rings_to_polygons(items)
     parts += [LineString(it.pts).buffer(0.05) for it in items if not it.closed and len(it.pts) >= 2]
+    if photo:  # thousands of dot lines: the photo's rectangle is what a photo tag needs
+        xs = [x for x, _ in photo]
+        ys = [y for _, y in photo]
+        parts.append(Polygon([(min(xs), min(ys)), (max(xs), min(ys)), (max(xs), max(ys)), (min(xs), max(ys))]))
     if not parts:
         return []
     design = unary_union(parts)

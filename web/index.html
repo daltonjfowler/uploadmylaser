@@ -45,8 +45,8 @@
     <button id="zoomIn" data-hint="Zoom in.">+</button>
     <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
     <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
-    <input type="file" id="openFile" accept=".svg,.dxf,.uml,image/svg+xml" hidden>
-    <input type="file" id="importFile" accept=".svg,.dxf,.uml,image/svg+xml" hidden>
+    <input type="file" id="openFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
+    <input type="file" id="importFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
   </nav>
 
   <div class="sizebar" id="sizebar">
@@ -175,6 +175,8 @@
             <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select everything</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Copy / paste (it lands a little down and to the left)</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate the selected parts</td></tr>
             <tr><td><kbd>Shift</kbd>+click</td><td>Add or remove a part from the selection</td></tr>
             <tr><td><kbd>Delete</kbd></td><td>Remove the selected parts</td></tr>
             <tr><td>Arrow keys</td><td>Nudge 1 mm (<kbd>Shift</kbd>: 10 mm)</td></tr>
@@ -203,6 +205,12 @@
             <li>The green dot is the <b>top-right corner</b> of your design. Move the laser head there on the machine.</li>
             <li><b>Send to laser</b> only loads your design. Then, on the laser, press <b>Frame</b> (the head traces the outline with the beam off) to check it fits your material, and press <b>Start</b>.</li>
             <li><b>Open</b> starts over with a file. <b>Import</b> adds a file next to what's there. <b>Save</b> keeps your whole design as a <b>.uml</b> file to open again later.</li>
+            <li><b>Box maker</b> (left tools) makes a finger-joint box for your material. Measure your board; if the fingers are too tight or loose, change Fit.</li>
+            <li>A name keychain: type your name, then under <b>Selected part</b> tick <b>Cut an outline around it</b> and <b>Keyring hole</b>.</li>
+            <li>Cutting out a joined-up (script) name? Tick <b>Weld</b> so the letters join into one shape.</li>
+            <li><b>Mirror</b> flips a design, for engraving the back of glass or acrylic. <b>Align</b> lines up several parts.</li>
+            <li><b>Photo (beta)</b>: Import a PNG or JPG. Start small: photos take a while to engrave.</li>
+            <li>Type your board's size under <b>My material</b> to see it on the bed.</li>
             <li><b>Group</b> ties parts together. <b>Ungroup</b> unties them, or splits a file into its separate shapes.</li>
             <li><b>Hide</b> on a colour only hides it on the screen. Hidden lines still run on the laser.</li>
             <li>No laser here? <b>Export for teacher</b> saves one file with your design and the laser file.</li>
@@ -218,6 +226,26 @@
         </section>
       </div>
     </div>
+  </div>
+
+  <div id="photoDlg" class="gate" hidden>
+    <form id="photoForm" class="card wide">
+      <h2>Photo (beta)</h2>
+      <p class="muted small">Turns a picture into dots the laser engraves. Try a small one first: photos can take a while.</p>
+      <canvas id="photoPrev" class="photoprev" aria-label="How the photo will engrave"></canvas>
+      <div class="row">
+        <label>Width <input id="phW" type="number" min="10" max="200" step="any" value="60"> mm</label>
+        <label>Detail <select id="phRes"><option value="0.3">Fast</option><option value="0.2" selected>Normal</option><option value="0.15">Fine</option></select></label>
+        <label>Style <select id="phMode"><option value="dither" selected>Dots (photos)</option><option value="threshold">Black and white (logos)</option></select></label>
+      </div>
+      <div class="row">
+        <label>Brightness <input id="phB" type="range" min="-100" max="100" value="0"></label>
+        <label>Contrast <input id="phC" type="range" min="-100" max="100" value="0"></label>
+        <label><input id="phInv" type="checkbox"> Invert</label>
+      </div>
+      <p id="phInfo" class="small muted"></p>
+      <div class="row"><button id="phAdd" class="go">Add photo</button> <button type="button" id="phCancel">Cancel</button></div>
+    </form>
   </div>
 
   <div id="boxDlg" class="gate" hidden>

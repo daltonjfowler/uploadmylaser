@@ -334,3 +334,50 @@ def test_text_outline_makes_a_keychain_job_with_cut_last():
     assert [p.kind for p in res.preview] == ["engrave", "cut"]
     b = res.part_boxes[0]
     assert b[3] - b[1] > 10 * 1.6  # two lines tall
+
+
+# ---------- photo (beta) ----------
+
+def _pbm(rows, mm=0.5):
+    w = len(rows[0])
+    data = f"P4\n# uml-mm-per-px {mm}\n{w} {len(rows)}\n".encode()
+    for r in rows:
+        bits = "".join("1" if c == "#" else "0" for c in r).ljust(((w + 7) // 8) * 8, "0")
+        data += int(bits, 2).to_bytes(len(bits) // 8, "big")
+    return data
+
+
+def test_photo_rows_become_engrave_lines_in_alternating_directions():
+    from app.geometry import ImportWarnings
+    from app.geometry.photo_import import import_photo
+    items = import_photo(_pbm(["##..#", ".....", "#####"]), ImportWarnings())
+    assert [(it.pts[0][0], it.pts[1][0]) for it in items] == [(0.0, 1.0), (2.0, 2.5), (2.5, 0.0)]
+    assert all(it.kind == "engrave" and not it.closed for it in items)
+
+
+def test_photo_is_engraved_as_it_is_not_hatched_again():
+    data = _pbm(["#" * 20] * 10 + ["." * 20] * 2)
+    parts = [FilePart(file_index=0, file_type="pbm", x_mm=100, y_mm=10)]
+    res = process(ContainerJob(request=ProcessRequest(material_id="ply3", parts=parts), material=MAT, machine=M,
+                               files_b64=[base64.b64encode(data).decode()]))
+    assert res.errors == [] and res.warnings == [] and res.rd
+    assert [p.kind for p in res.preview] == ["engrave"] and len(res.preview[0].paths) == 10
+
+
+def test_bad_photos_are_refused_kindly():
+    from app.geometry import ImportProblem, ImportWarnings
+    from app.geometry.photo_import import import_photo
+    for bad in [b"P5\n1 1\n\x00", b"P4\n2 2\n\x00\x00", _pbm(["...."]), _pbm(["#"], mm=5)]:
+        with pytest.raises(ImportProblem):
+            import_photo(bad, ImportWarnings())
+
+
+def test_a_photo_is_never_cut_through_and_its_outline_is_its_rectangle():
+    data = _pbm(["#.#.#.#.#."] * 6)
+    parts = [FilePart(file_index=0, file_type="pbm", x_mm=100, y_mm=10, color_map={"photo:dots": "cut"},
+                      outline={"dist_mm": 2})]
+    res = process(ContainerJob(request=ProcessRequest(material_id="ply3", parts=parts), material=MAT, machine=M,
+                               files_b64=[base64.b64encode(data).decode()]))
+    assert res.errors == []
+    kinds = [p.kind for p in res.preview]
+    assert kinds == ["engrave", "cut"] and len(res.preview[1].paths) == 1  # the dots engrave; one outline cuts
