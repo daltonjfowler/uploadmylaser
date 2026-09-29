@@ -27,8 +27,10 @@ The first deploy pushes the Docker image, which takes a few minutes. Later deplo
   and 400 a minute for everyone (the bill guard), 10 MB upload cap, strict request validation. Power and
   speed only ever come from the teacher's presets in KV, and the container clamps them again.
 - Teacher: `TEACHER_KEY` compared in constant time, 300 ms pause on a wrong key, and a site-wide guard
-  after 100 wrong keys in 15 minutes that never locks out the right key. No per-IP lockouts, since the
-  whole school shares one public IP.
+  after 100 wrong keys in 15 minutes that never locks out the right key.
+- Wrong tries on the class phrase or the teacher key lock out one **device**, not an IP (src/lockout.ts):
+  5 wrong in a row lock it for 5 s, doubling to 300 s at most, and a right answer clears it. The whole
+  school shares one public IP, so one student guessing never locks out the class or the teacher.
 - Optional school-only lock: set `ALLOWED_CIDRS` in wrangler.jsonc to the district's public IP ranges
   (IPv4/IPv6, comma-separated) and redeploy. Ask district IT for them.
 

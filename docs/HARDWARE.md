@@ -58,12 +58,12 @@ Decode it yourself: `powershell -ExecutionPolicy Bypass -File scripts\rddecode.p
   origin** (the panel's Origin key)? Jog the head, Frame a job, and see where it traces. If it goes to a stored
   origin instead, students set it with the panel's Origin key, or we switch to `D8 12` (REF_POINT_0).
 
-## Wanted: "Send to panel" (the class's usual workflow)
+## "Send to panel" (the class's usual workflow)
 
 Normally the class uses LightBurn's **Send**, which stores the job in controller memory, then **frames and
 starts from the touchscreen**. That's a good safety gate for kids, because someone has to be at the machine.
-The app currently streams the job the way LightBurn's **Start** does. It also has Frame/Send buttons, which
-are extras.
+The app now does the same by default (teacher setting, on since 2026-09-28): Send stores the job by name,
+and students Frame and Start on the panel. The app has no Frame button and never starts a job.
 
 ### Send to panel: the Ruida file commands
 From MeerK40t's Ruida emulator (`meerk40t/ruida/emulator.py`, MIT), not yet checked on the class RDC6445S:

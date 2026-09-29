@@ -21,6 +21,8 @@ docker build -t uml container   # proves the image and its fonts still build
 | `/teacher/` with a wrong key | "Wrong teacher key." after a short pause | |
 | Teacher: set phrase, warm up | "Ready." | |
 | Student: phrase, material, Text "Hi" | preview, estimate, no errors | |
+| Student: Import an SVG, Ungroup, Save, then Open the `.uml` | pieces split; the design comes back the same | |
+| Student: Download laser file, Export for teacher | a `.rd`, and one zip with the `.uml`, `.rd` and `READ ME.txt` | |
 
 ## Hardware (Chromebook + laser, cardboard, low power)
 Stay at the machine with the lid closed for every job.
@@ -29,9 +31,9 @@ Stay at the machine with the lid closed for every job.
 |---|---|---|---|
 | 1 | `serial-test.html` replay (local `npm run dev:web` only, not live) of `test/golden/20mm_absolute.rd` | cuts the square; fill in docs/HARDWARE.md table | |
 | 2 | Connect from the student page | port picker shows the FTDI device (0403:6001) | |
-| 3 | Frame a 50 mm box | head traces the box, laser stays off | |
-| 4 | Does Frame start at the **current head position**? | yes → `D8 11` is right. No → see HARDWARE.md | |
-| 5 | Send a 20 mm box, Cut through | runs immediately, or waits for Start on the panel (record which) | |
+| 3 | Send a 50 mm box, press Frame on the laser panel | head traces the box, laser stays off | |
+| 4 | Does the panel Frame start at the **current head position**? | yes → `D8 11` is right. No → see HARDWARE.md | |
+| 5 | Send a 20 mm box, Cut through | shows in the panel file list under its name, waits for Start (never runs on its own) | |
 | 6 | 30 mm circle | round, closes cleanly | |
 | 7 | Box with a circle inside, both Cut through | inner circle is cut **before** the outer box | |
 | 8 | Text "Hi", Engrave | filled letters, holes in letters stay empty | |
@@ -39,7 +41,7 @@ Stay at the machine with the lid closed for every job.
 | 10 | Engrave + Mark + Cut in one design | runs Engrave → Mark → Cut, cut passes last | |
 | 11 | DXF with arcs and a spline | smooth curves, right size | |
 | 12 | Open, then Import a second file | both parts land where shown, relative spacing kept | |
-| 13 | Design near each edge of the material | Frame shows it before cutting | |
+| 13 | Design near each edge of the material | panel Frame shows it before cutting | |
 | 14 | STOP during a long job | laser stops. Record whether the head parks | |
 | 15 | Unplug USB mid-job | page says "Laser not connected"; laser behaviour recorded | |
 | 16 | Cold start (container asleep >10 min) | first preview takes a few seconds, then works | |

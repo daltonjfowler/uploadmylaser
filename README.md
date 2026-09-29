@@ -22,29 +22,46 @@ for complex projects. This handles "kid mode".
 
 ## Screenshot
 
-<img src="docs/screenshot-student.png" width="800" alt="The student page at Chromebook size: title bar with the logo, theme toggle and Connect laser; toolbar with Open, Import, Rotate, Delete and zoom; a size bar for the selected text; Select, Text, Box and Circle tools on the left; the laser bed with mm rulers showing a black cut-through box, blue engraved text reading HI DALTON and a red marked circle; the three-colour palette; and the Cuts/Layers and Laser panels on the right with a step checklist">
+<img src="docs/screenshot-student.png" width="800" alt="The student page: title bar with the logo, Help, Teacher, theme toggle and Connect laser; toolbar with Open, Save, Import, Undo, Redo, Select all, Rotate, Group, Ungroup, Delete and zoom; a size bar for the selected file; Select, Text, Box, Circle, Line, Curve, Shapes and Pattern tools on the left; the laser bed with mm rulers showing an imported key tag with a black cut-through outline and hole, a blue engraved star and red marked lines; the three-colour palette and material chip; and the Layers and Laser panels on the right with Hide buttons and a step checklist">
 
-The student page at Chromebook resolution (1366x768): a cut-through box, engraved text and a marked
-circle, with the text selected. There is a [dark mode](docs/screenshot-student-dark.png) too.
+The student page with an imported SVG key tag selected: a cut-through outline and hole, an engraved
+star and marked lines. Before the class phrase is entered, the bed shows the browser's own sketch of
+the file. There is a [dark mode](docs/screenshot-student-dark.png) too.
 
 ## What it does
 
 - **Draw with three colours.** Black cuts through, red marks a line, blue engraves (fills the shape).
   SVG strokes/fills and DXF layers or colours are mapped the same way, and any other colour asks the
-  student what it should do.
+  student what it should do. The **Colours in your files** list shows every colour in every imported
+  file, and each one can be changed (or skipped) at any time.
 - **LightBurn-style workspace.** Open (start over with a file) and Import (add a file next to what's
   there), Text with seven fonts, Box, Circle, Line and Curve tools, a Shapes library (stars, hearts,
-  sports balls, callouts, a potted plant...), a Pattern tool for rows and columns of copies, Ctrl+A multi-select,
-  handles on every corner and side, a move grip, a size lock, Scale %, Undo/Redo, rotate, mm rulers,
-  and mouse-wheel or pinch zoom. Designs autosave to the Chromebook's `localStorage`.
+  sports balls, callouts, a potted plant...), a Pattern tool for rows and columns of copies, handles on
+  every corner and side, a move grip, a size lock, Scale %, Undo/Redo, rotate, mm/cm/inch rulers, and
+  mouse-wheel or pinch zoom. Up to 5000 parts in one design.
+- **Selecting and grouping.** Click, Shift+click or Ctrl+A to select. Drag on empty bed for a box
+  select: left to right picks parts wholly inside, right to left also picks parts it touches.
+  **Group** ties parts together; **Ungroup** unties them, or splits a DXF or SVG into its separate
+  shapes (an engraved shape keeps its holes). Shift+drag or the middle mouse button pans. Right-click
+  opens a menu with the colours, Group, Ungroup, Rotate, Delete and Hide/Show.
+- **Hide a colour.** Each layer has a Hide/Show button. It only changes the screen: hidden lines still
+  run on the laser. While the server works on a change, an "Updating the laser lines..." sign shows.
+- **Design files.** Designs autosave to the Chromebook's `localStorage`. **Save** writes the whole design
+  as a `.uml` file that Open or Import brings back on any computer.
 - **Runs in a safe order.** Engrave, then Mark, then Cut through, always last with all its passes,
   because parts that are cut free can shift. Inner cuts go before outer ones.
 - **The laptop never starts the laser.** Send only loads the job; the student then presses Frame
-  (beam off) and Start on the laser's own panel, so someone is always at the machine. Send stays
-  disabled until the student ticks "I will stay with the laser".
+  (beam off) and Start on the laser's own panel, so someone is always at the machine. The app has no
+  Frame button of its own. By default Send stores the job in the laser's file list under a name of up
+  to 8 letters (replacing a file with the same name); the teacher can switch it to a plain load that
+  waits for Start. Send stays disabled until the student ticks "I will stay with the laser".
   STOP is sent from the browser, so it works even if the network is down (and Esc does the same).
+- **No laser in the room?** **Download laser file** saves the finished job as a Ruida `.rd` file, with
+  the teacher's limits already in it, for the laser's USB port. **Export for teacher** saves one zip with
+  the `.uml` design, the `.rd` file when it is ready, and a `READ ME.txt` saying what state it was in.
 - **A rolling class phrase.** The teacher sets today's phrase, with an expiry, from a `/teacher` page
   guarded by a secret key. The site opens for anyone, but nothing is processed without the phrase.
+  Wrong tries lock out one device at a time, never the whole class (a school shares one IP).
 - **Teacher page.** Materials and presets (materials named PVC, vinyl and other unsafe plastics are refused by name; a
   name check cannot know what a sheet really is), machine
   settings, the class phrase, and a warm-up button for the container.
@@ -72,8 +89,8 @@ Chromebook (Chrome)                          Cloudflare
                                                          → hatch fill → Ruida .rd encoder
 ```
 
-The Ruida `.rd` encoder mirrors what LightBurn writes for this controller, checked against real
-LightBurn files in [test/golden/](test/golden/). See [docs/HARDWARE.md](docs/HARDWARE.md) for what has
+The Ruida `.rd` encoder follows MeerK40t's `rdjob.py` and is checked against known-good `.rd` files
+in [test/golden/](test/golden/). See [docs/HARDWARE.md](docs/HARDWARE.md) for what has
 been verified on the machine, and [PLAN.md](PLAN.md) for the full design.
 
 ## Commands
