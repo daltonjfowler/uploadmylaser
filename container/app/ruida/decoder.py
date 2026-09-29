@@ -37,7 +37,7 @@ NAMES: dict[bytes, str] = {
     b"\xE7\x61": "PART_MIN_POINT_EX", b"\xE7\x62": "PART_MAX_POINT_EX",
     b"\xEA": "ARRAY_START", b"\xEB": "ARRAY_END", b"\xF0": "REF_POINT_SET",
     b"\xF1\x02": "ENABLE_BLOCK_CUTTING", b"\xF1\x03": "DISPLAY_OFFSET",
-    # seen in LightBurn output for the RDC6445S
+    # seen in reference .rd files for the RDC6445S
     b"\xC6\x50": "THROUGH_POWER_1", b"\xC6\x51": "THROUGH_POWER_2", b"\xCA\x10": "LAYER_CA10",
     b"\xE7\x37": "ARRAY_UNIT_SIZE", b"\xDA\x01": "SET_VARIABLE",
     b"\xF1\x00": "ELEMENT_MAX_INDEX", b"\xF1\x01": "ELEMENT_NAME_MAX_INDEX",

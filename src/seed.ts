@@ -1,6 +1,6 @@
 // Each material has three presets matching the colour rule students draw with:
 //   black = cut (through), red = score ("Mark" in the UI), blue = engrave.
-// The only preset for now: the teacher's tested LightBurn settings for Masonite/Luan (2026-09-23).
+// The only preset for now: the teacher's tested settings for Masonite/Luan (2026-09-23).
 // Add more materials from the teacher page after test-firing them.
 import type { MachineConfig, Material } from '../shared/contracts.ts';
 
@@ -9,7 +9,7 @@ export const DEFAULT_MACHINE: MachineConfig = {
   bedHeightMm: 609,
   origin: 'top-right',
   jobOriginMode: 'relative', // teacher's preference: job's top-right corner starts at the laser head
-  swizzleMagic: 0x88, // RDC6445S, verified from LightBurn .rd files
+  swizzleMagic: 0x88, // RDC6445S, verified from reference .rd files
   baud: 115200,       // FT245 FIFO; baud is reportedly ignored
   maxJobMinutes: 20,
   absoluteMaxPowerPct: 80,

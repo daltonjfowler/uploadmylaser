@@ -1,7 +1,7 @@
 """Build a Ruida .rd job from mm polylines.
 
-The command layout mirrors what **LightBurn writes for this RDC6445S**, decoded from
-test/golden/*.rd (see docs/HARDWARE.md). Command names and encodings come from MeerK40t (MIT).
+The command layout matches the reference files in test/golden/*.rd for this RDC6445S (see
+docs/HARDWARE.md). Command names and encodings come from MeerK40t (MIT).
 Units on the wire: µm for coordinates, µm/s for speed, 14-bit fraction of 16383 for power.
 Everything here works in *machine* coordinates: see `to_machine()` for the bed → machine flip.
 """
@@ -36,7 +36,7 @@ def enc_speed(mm_s: float) -> bytes:
 
 REL_LIMIT_UM = 8191  # 14-bit signed relative moves
 
-# "Start From: Absolute Coords" in LightBurn = D8 10 + E6 01 (verified: test/golden/20mm_absolute.rd).
+# Absolute placement = D8 10 + E6 01 (verified: test/golden/20mm_absolute.rd).
 ABSOLUTE_COORDS = b"\xD8\x10\xE6\x01"
 # Job anchored at the laser head, coordinates from the job's own corner (the class nameplate file: D8 11,
 # no E6 01, bbox starting at 0,0). VERIFY on the machine that D8 11 means "current head position" and not
@@ -45,7 +45,7 @@ RELATIVE_TO_HEAD = b"\xD8\x11"
 
 RUN_ORDER: dict[str, int] = {"engrave": 0, "score": 1, "cut": 2}
 
-# Engrave layers use the controller's scan mode, exactly like LightBurn's Fill (test/golden/20mm_fill.rd).
+# Engrave layers use the controller's scan mode, as in test/golden/20mm_fill.rd.
 SCAN_KINDS = {"engrave"}
 
 
@@ -62,7 +62,7 @@ class EncLayer:
     paths: list[Poly] = field(default_factory=list)  # machine µm, already ordered
 
 
-# 0xRRGGBB as LightBurn writes it (its layer 00 black = 0, layer 01 blue = 0x0000FF). Shown on the panel.
+# 0xRRGGBB, as in the reference files (layer 00 black = 0, layer 01 blue = 0x0000FF). Shown on the panel.
 LAYER_COLORS = {"cut": 0x000000, "score": 0xFF0000, "engrave": 0x0000FF}  # black cut, red mark, blue engrave
 
 
@@ -115,7 +115,7 @@ class RdWriter:
             self.buf += p
 
     def move(self, x: Um, y: Um) -> None:
-        """Travel (laser off). LightBurn always uses absolute moves for travel."""
+        """Travel (laser off). Always absolute moves, as in the reference files."""
         self(b"\x88", enc35(x), enc35(y))
         self.x, self.y = x, y
 
@@ -162,7 +162,7 @@ def encode_job(layers: list[EncLayer], m: MachineConfig, *, laser_on: bool = Tru
     def powers(s: OpSettings) -> tuple[float, float]:
         return (s.power_min_pct, s.power_max_pct) if laser_on else (0.0, 0.0)
 
-    # --- header (order as LightBurn writes it) ---
+    # --- header (order as in the reference files) ---
     w(ABSOLUTE_COORDS if m.job_origin_mode == "absolute" else RELATIVE_TO_HEAD)
     w(b"\xF0")                      # ref point set
     w(b"\xF1\x02", b"\x00")             # enable block cutting: off
@@ -197,15 +197,15 @@ def encode_job(layers: list[EncLayer], m: MachineConfig, *, laser_on: bool = Tru
     w(b"\xE7\x55", b"\x00", enc35(0))  # layer offset x
     w(b"\xE7\x55", b"\x01", enc35(0))  # layer offset y
     w(b"\xF1\x03", _pt(0, 0))          # display offset
-    # LightBurn also writes an ELEMENT_* block (F1 00 … F2 07) here. MeerK40t omits it, and so do we.
+    # The reference files also have an ELEMENT_* block (F1 00 … F2 07) here. MeerK40t omits it, and so do we.
     # If the controller rejects our jobs, adding it back is the first thing to try.
     w(b"\xEA", b"\x00")                # array start
     w(b"\xE7\x60", b"\x00")            # current element index
     w(b"\xE7\x13", _pt(x0, y0))        # array min
     w(b"\xE7\x17", _pt(x1, y1))        # array max
-    w(b"\xE7\x23", _pt(x0, y0))        # array add (LightBurn: the min corner)
+    w(b"\xE7\x23", _pt(x0, y0))        # array add (the min corner)
     w(b"\xE7\x24", b"\x00")            # array mirror
-    w(b"\xE7\x37", _pt(x1, y1))        # (LightBurn: the max corner)
+    w(b"\xE7\x37", _pt(x1, y1))        # (the max corner)
     w(b"\xE7\x08", enc14(1), enc14(1), _pt(x1 - x0, y1 - y0))  # array repeat 1 × 1, unit = width × height
 
     # --- layers ---
@@ -239,12 +239,12 @@ def encode_job(layers: list[EncLayer], m: MachineConfig, *, laser_on: bool = Tru
                 for pt in poly[1:]:
                     (w.cut if laser_on else w.move)(*pt)
         if scan:
-            w(b"\xE7\x00")                             # LightBurn closes scan layers with a block end
+            w(b"\xE7\x00")                             # scan layers close with a block end
 
     # --- tail ---
     w(b"\xEB")                                # array end
     w(b"\xE7\x00")                            # block end
-    # LightBurn writes DA 01 06 20 … here (a controller variable). Omitted until we know what it is.
+    # The reference files have DA 01 06 20 … here (a controller variable). Omitted until we know what it is.
     w(b"\xE5\x05", enc35(sum(w.buf) + 0xD7))  # checksum over unswizzled bytes, verified on golden file
     w(b"\xD7")                                # end of file
     return swizzle(bytes(w.buf), m.swizzle_magic)

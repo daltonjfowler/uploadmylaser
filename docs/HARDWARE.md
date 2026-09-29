@@ -8,19 +8,19 @@ people's reverse engineering.
 | Controller | RDC6445S | ✅ (panel) | teacher read it off the controller |
 | Swizzle magic | 0x88 | ✅ | golden file decodes, ends with D7, and the checksum matches exactly |
 | File checksum `E5 05` = sum(unswizzled bytes before it) + 0xD7 | | ✅ | golden: stored 2459556 = computed |
-| Command layout LightBurn uses | see "LightBurn layout" below | ✅ | decoded golden file. Encoder mirrors it |
+| Job file command layout | see "Job file layout" below | ✅ | decoded golden file. Encoder mirrors it |
 | USB chip | FTDI FT245R, VID 0403 / PID 6001 | ☐ | serial-test.html port info |
 | Baud | ignored (FIFO), sending 115200 | ☐ | replay works at 115200 |
 | Flow control | hardware (RTS/CTS) | ☐ | replay works; try "none" if it stalls |
 | ACK / reply bytes over USB | none expected | ☐ | serial-test.html RX log |
 | Job starts on receive, or waits for panel Start? | waits for Start on the panel | ✅ | teacher, 2026-09-24, streamed from the app on a Windows ThinkPad |
 | Home / origin corner | top-right (guess) | ☐ | jog to home, then note the corner |
-| Bed size | 914 × 609 mm (36" × 24") | ☐ | spec sheet / LightBurn device settings |
+| Bed size | 914 × 609 mm (36" × 24") | ☐ | spec sheet / laser software device settings |
 | STOP (D8 01) aborts a running job | ? | ☐ | send a long job, press STOP |
 | Frame (move-only job) traces without firing | ? | ☐ | |
 
 ## Phase 0 procedure
-1. **In LightBurn (Windows laptop):** make each test job at low power on cardboard, then use
+1. **In the desktop laser software (Windows laptop):** make each test job at low power on cardboard, then use
    **File → Save RD file** into `test/golden/`. Fill in the table in `test/golden/README.md`.
 2. The test page is **not on the live site** (it can send any file to the laser, past every safety
    check). Run it on a Windows laptop: `npm run dev:web`, then open `http://localhost:5173/serial-test.html`.
@@ -60,7 +60,7 @@ Decode it yourself: `powershell -ExecutionPolicy Bypass -File scripts\rddecode.p
 
 ## "Send to panel" (the class's usual workflow)
 
-Normally the class uses LightBurn's **Send**, which stores the job in controller memory, then **frames and
+Normally the class sends jobs from the desktop software, which stores the job in controller memory, then **frames and
 starts from the touchscreen**. That's a good safety gate for kids, because someone has to be at the machine.
 The app now does the same by default (teacher setting, on since 2026-09-28): Send stores the job by name,
 and students Frame and Start on the panel. The app has no Frame button and never starts a job.

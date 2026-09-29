@@ -1,4 +1,4 @@
-"""Fill engraving as horizontal scan lines. This is how LightBurn's Fill mode moves on the RDC6445S
+"""Fill engraving as horizontal scan lines. This is how fill engraving moves on the RDC6445S
 (test/golden/20mm_fill.rd): alternating-direction lines at a fixed spacing."""
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-// Student app, laid out a bit like LightBurn: toolbar, tools on the left, the bed in the middle,
+// Student app, laid out like desktop laser software: toolbar, tools on the left, the bed in the middle,
 // Layers and Laser panels on the right. Every part is processed by the server; the page only
 // arranges parts, previews what comes back, and streams the finished job over USB.
 import '@fontsource/anton/latin-400.css';
@@ -56,7 +56,7 @@ const toU = (mm: number) => round(mm / UNIT_MM[unit], UNIT_DIGITS[unit]);
 const fromU = (v: number) => v * UNIT_MM[unit];
 
 const relative = () => (machine.jobOriginMode ?? 'relative') === 'relative';
-// X/Y boxes count from the machine's home corner (top-right on the class laser), like LightBurn.
+// X/Y boxes count from the machine's home corner (top-right on the class laser).
 // Both flips are their own inverse, so they convert bed mm to typed values and back.
 const zeroRight = () => (machine.origin ?? 'top-right').endsWith('right');
 const zeroBottom = () => (machine.origin ?? 'top-right').startsWith('bottom');

@@ -1,5 +1,5 @@
 // Ungroup: split one file part into pieces, using the lines the server already made for it (bed mm).
-// Every shape is its own piece, holes too (like LightBurn; Dalton, 2026-09-29). The one exception is an
+// Every shape is its own piece, holes too (Dalton, 2026-09-29). The one exception is an
 // engraved shape's holes: alone, the middle of an engraved "O" would fill solid. Loose lines that meet
 // end to end (AutoCAD LINEs) are joined first, so a box drawn as four lines is one box. Each piece becomes a small SVG in the same black/red/blue as Box and Circle.
 // No DOM, so Node tests can load it.

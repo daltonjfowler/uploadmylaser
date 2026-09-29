@@ -5,11 +5,11 @@
 A kid-safe laser sender for Chromebook classrooms. Students open a website, pick their material,
 drop in an SVG or DXF (or type their name), arrange it on the laser bed, and send it to the
 classroom **Boss LS36 laser (Ruida RDC6445S controller)** over USB with the Web Serial API. Nothing
-is installed on the student machine: no LightBurn, no driver, no extension, no account.
+is installed on the student machine: no laser software, no driver, no extension, no account.
 
-It exists because managed Chromebooks cannot run LightBurn, and a class of thirty needs a simple,
-safe way to get a name tag or a box onto the laser. LightBurn stays on the teacher's Windows laptop
-for complex projects. This handles "kid mode".
+It exists because managed Chromebooks cannot run desktop laser software, and a class of thirty needs
+a simple, safe way to get a name tag or a box onto the laser. The desktop software stays on the
+teacher's Windows laptop for complex projects. This handles "kid mode".
 
 - **Students never choose power or speed.** The teacher sets presets per material. The server
   resolves them, and the processing container clamps every layer to a machine ceiling again before
@@ -34,7 +34,7 @@ the file. There is a [dark mode](docs/screenshot-student-dark.png) too.
   SVG strokes/fills and DXF layers or colours are mapped the same way, and any other colour asks the
   student what it should do. The **Colours in your files** list shows every colour in every imported
   file, and each one can be changed (or skipped) at any time.
-- **LightBurn-style workspace.** Open (start over with a file) and Import (add a file next to what's
+- **Laser-software-style workspace.** Open (start over with a file) and Import (add a file next to what's
   there), Text with seven fonts, Box, Circle, Line and Curve tools, a Shapes library (stars, hearts,
   sports balls, callouts, a potted plant...), a Pattern tool for rows and columns of copies, handles on
   every corner and side, a move grip, a size lock, Scale %, Undo/Redo, rotate, mm/cm/inch rulers, and
@@ -127,7 +127,7 @@ MIT license's warranty disclaimer.
 
 ## Trademarks and licensing
 
-LightBurn, Ruida and Boss Laser are trademarks of their respective owners. This project is an independent tool written by a
+Ruida and Boss Laser are trademarks of their respective owners. This project is an independent tool written by a
 teacher. It is not affiliated with, sponsored by, or endorsed by any of them. Those names are used
 only to describe what this software is compatible with. The Ruida protocol handling was written from
 public reverse-engineering notes and the MIT-licensed [MeerK40t](https://github.com/meerk40t/meerk40t)

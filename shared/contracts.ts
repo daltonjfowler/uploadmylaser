@@ -37,7 +37,7 @@ export interface MachineConfig {
   absoluteMaxPowerPct: number;
   minSpeedMmS: number;
   travelSpeedMmS: number;
-  /** Send stores the job on the controller under a name, like LightBurn's Send (docs/HARDWARE.md). */
+  /** Send stores the job on the controller under a name, the way desktop laser software sends it (docs/HARDWARE.md). */
   sendToPanel?: boolean;
 }
 

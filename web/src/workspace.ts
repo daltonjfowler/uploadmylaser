@@ -126,7 +126,7 @@ export class Workspace {
     this.fit();
   }
 
-  /** Rulers and grid count from this corner (the machine's home corner), like LightBurn. */
+  /** Rulers and grid count from this corner (the machine's home corner). */
   setZeroCorner(right: boolean, bottom: boolean): void {
     this.zero = { right, bottom };
     this.draw();
@@ -541,7 +541,7 @@ export class Workspace {
     this.draw();
   };
 
-  /** Left to right picks parts wholly inside the box; right to left also picks parts it touches (LightBurn). */
+  /** Left to right picks parts wholly inside the box; right to left also picks parts it touches. */
   private finishBox(b: { x0: number; y0: number; x1: number; y1: number }): void {
     const [x0, x1] = [Math.min(b.x0, b.x1), Math.max(b.x0, b.x1)];
     const [y0, y1] = [Math.min(b.y0, b.y1), Math.max(b.y0, b.y1)];

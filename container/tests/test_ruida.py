@@ -103,7 +103,7 @@ def test_frame_turns_air_assist_off():
 GOLDEN_FILES = sorted(GOLDEN.glob("*.rd")) if GOLDEN.exists() else []
 needs_golden = pytest.mark.skipif(not GOLDEN_FILES, reason="no golden files yet")
 
-# Differences from LightBurn we make on purpose (see encoder.py comments).
+# Differences from the reference files we make on purpose (see encoder.py comments).
 # SET_ABSOLUTE/REF_POINT_*: the nameplate file was saved with a different "Start From" than we use.
 SKIP = {"REF_POINT_1", "REF_POINT_2", "REF_POINT_0", "SET_ABSOLUTE", "SET_VARIABLE"}
 SKIP_PREFIX = ("ELEMENT_",)
@@ -134,8 +134,8 @@ def test_golden_files_decode_cleanly():
 
 
 @needs_golden
-def test_encoder_layout_matches_lightburn():
-    """Same command skeleton as LightBurn for a job with the same number of layers."""
+def test_encoder_layout_matches_golden():
+    """Same command skeleton as the golden file for a job with the same number of layers."""
     for f in GOLDEN_FILES:
         cmds = decode_rd(f.read_bytes(), 0x88)
         golden = _structure(cmds)
@@ -147,7 +147,7 @@ def test_encoder_layout_matches_lightburn():
 
 
 @needs_golden
-def test_absolute_square_bounds_match_lightburn():
+def test_absolute_square_bounds_match_golden():
     """20mm_absolute.rd: a 20 mm square at machine (15, 29)–(35, 49), cut with 2 passes."""
     f = GOLDEN / "20mm_absolute.rd"
     if not f.exists():

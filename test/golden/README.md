@@ -1,9 +1,9 @@
 # Golden files
 
-`.rd` files saved from LightBurn (**File → Save RD file**) on the RDC6445S. The encoder is checked
+Reference `.rd` jobs for the RDC6445S. The encoder is checked
 against these, and `web/serial-test.html` replays them over USB.
 
-Name each file for what it does, and note its LightBurn settings here:
+Name each file for what it does, and note its settings here:
 
 | File | What | Speed | Max / Min power | Notes |
 |---|---|---|---|---|

@@ -62,7 +62,7 @@ export class LaserLink {
     try {
       await port.open({ baudRate: this.opts.baud, flowControl: this.opts.flowControl ?? 'hardware', bufferSize: 4096 });
     } catch (e) {
-      throw new Error(`Couldn't open the laser's USB port. Close any other tab or app using it (LightBurn), then unplug and replug the cable. (${(e as Error).message})`);
+      throw new Error(`Couldn't open the laser's USB port. Close any other tab or laser app using it, then unplug and replug the cable. (${(e as Error).message})`);
     }
     this.port = port;
     this.writer = port.writable!.getWriter();

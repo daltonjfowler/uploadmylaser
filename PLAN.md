@@ -2,7 +2,7 @@
 
 A web app that lets students send simple jobs to the classroom **Boss LS36 (Ruida
 controller)** from a **Chromebook over USB**, using **power/speed presets the teacher sets**.
-LightBurn stays on the Windows laptop for complex teacher projects. This app handles "kid mode" only.
+The teacher's desktop laser software stays on the Windows laptop for complex projects. This app handles "kid mode" only.
 
 Sibling project: [uploadmycode](https://github.com/daltonjfowler/uploadmycode). This copies
 its architecture almost one-for-one: Vite + vanilla TS frontend, a Cloudflare Worker, a
@@ -30,7 +30,7 @@ key, and no student accounts.
 
 **Non-goals (for now)**
 - Photo/raster engraving (Phase 4).
-- Camera, rotary, nesting, and node editing. Use LightBurn for those.
+- Camera, rotary, nesting, and node editing. Use the teacher's desktop laser software for those.
 
 ---
 
@@ -98,7 +98,7 @@ Sources: [EduTech wiki: Ruida](https://edutechwiki.unige.ch/en/Ruida),
   35-bit numbers. Coordinates are in µm.
 - Key commands: `0x88` move abs, `0xA8` cut abs, `0x89/0xA9` move/cut rel, `0xC6…` power,
   `0xC9 02` speed, layer setup `0xCA…`, `0xD7` end of file. Copy the file header and bbox
-  from LightBurn-generated `.rd` files.
+  from known-good reference `.rd` files.
 - STOP = `D8 01`, pause `D8 02`, resume `D8 03` (swizzled like everything else).
 
 ---
@@ -158,9 +158,9 @@ colour. Unknown colors are returned in `unknownColors` for the student to assign
 
 ### Phase 0: Hardware spike (YOU at the laser, and blocks transport)
 1. Note the controller model on the panel (e.g. RDC6445GZ). This sets the swizzle magic.
-2. On the **Windows laptop in LightBurn**, make 4 tiny jobs (20 mm square cut, scored line,
+2. On the **Windows laptop, in the desktop laser software**, make 4 tiny jobs (20 mm square cut, scored line,
    filled engrave square, text) and **File → Save RD file** for each. Put them in
-   `test/golden/` with a screenshot of the LightBurn cut settings.
+   `test/golden/` with a note of the cut settings.
 3. On a **student Chromebook**, open a one-page Web Serial test page (lead builds this first,
    before anything else). It connects, logs port info, **streams a golden `.rd` byte-for-byte**
    at 38400 (then 19200 if that fails), and logs every byte received. Use low power on cardboard.
@@ -175,7 +175,7 @@ Output: `docs/HARDWARE.md`, and the `MachineConfig` defaults filled in.
 
 | Worker | Scope | Key files | Done when |
 |---|---|---|---|
-| **W1 Ruida encoder (Py)** | swizzle, 7-bit number packing, command builders, file header/bbox, layer setup, `encode_job()`, `encode_frame()`, `decode_rd()` debug tool, time estimate, final power/speed clamp | `container/app/ruida/` | `decode_rd()` parses every golden file. The encoded 20 mm square matches LightBurn's command sequence, with coordinates within 1 µm |
+| **W1 Ruida encoder (Py)** | swizzle, 7-bit number packing, command builders, file header/bbox, layer setup, `encode_job()`, `encode_frame()`, `decode_rd()` debug tool, time estimate, final power/speed clamp | `container/app/ruida/` | `decode_rd()` parses every golden file. The encoded 20 mm square matches the golden file's command sequence, with coordinates within 1 µm |
 | **W2 Geometry (Py)** | SVG (svgelements) + DXF (ezdxf) → mm polylines, curve flattening (0.05 mm tolerance), color/layer → op, text → paths (bundled OFL fonts), shapely hatching with holes, placement transform, path ordering (inner cuts before outer, nearest-neighbor), bounds checks | `container/app/geometry/` | Fixture files from Tinkercad, Inkscape, Canva SVG, and a CAD DXF produce correct layers, checked with snapshot tests |
 | **W3 Container service + Worker** | FastAPI `POST /process` and `GET /health` in the Dockerfile (python:3.12-slim), wiring geometry → encoder. Fork uploadmycode's `src/worker.ts`: rename to `LaserContainer`, add `/api/process` and `/api/materials` (GET) plus the teacher `PUT`s in KV, keep phrase/rate limit/CIDR/Counters, **10 MB upload limit, 30 s timeout** | `container/`, `src/`, `wrangler.jsonc` | `wrangler dev` round-trips a fixture SVG to a valid `ProcessResponse` |
 | **W4 Web Serial transport (TS)** | Port from uploadmycode's flash module. Filter for FTDI 0x0403, DTR/RTS init, chunked writes (with ACK waits if Phase 0 shows them), progress, hard-coded STOP, friendly errors ("unplug and replug", "close other tab") | `web/src/serial/` | A mock-port unit test passes, and the Phase 0 golden replay works through this module |
@@ -193,14 +193,14 @@ the golden files from Phase 0 step 2). W4 needs Phase 0 step 3 results before it
   laser the whole time."
 - No framework, and canvas only (as in uploadmycode, keep the bundle small for slow Chromebooks).
 
-#### Target look: "a bit like LightBurn", friendly for high schoolers
+#### Target look: like desktop laser software, friendly for high schoolers
 Reference: the mockup at https://claude.ai/artifact/FCvRwwKxxap8N63NYB47fE. The current `web/index.html`
 is a plain first pass. W6 rebuilds it to this layout:
 - **Layout:** title bar, toolbar (icons *with words*), size bar, left tools (Select, Text, Box, Circle),
   workspace with mm rulers, a palette of three colours only (Cut through / Mark / Engrave), and right
   docked panels **Layers** and **Laser** (step checklist, Frame, STOP, "I'll stay" tick, Send). Start
   from and Job origin are locked to *laser head / top-right*.
-- **Open vs Import** (same meaning as LightBurn):
+- **Open vs Import** (the usual meaning in laser software):
   - **Open…** = *start over with this file*. It clears the workspace (asking first if something's there) and
     loads one SVG/DXF.
   - **Import…** = *add this file to what's already here*, for example a logo next to a typed name. The
@@ -228,7 +228,7 @@ is a plain first pass. W6 rebuilds it to this layout:
 
 ### Phase 3.5: "Send to panel" (teacher's preferred workflow)
 Store the job in controller memory under a name (e.g. the student's first name + time), and frame and start
-it from the laser's touchscreen, the way the class uses LightBurn's Send today. Blocked on capturing
+it from the laser's touchscreen, the way the class sends jobs from the desktop software today. Blocked on capturing
 the Ruida file commands (docs/HARDWARE.md → "Send to panel"). Once checked, add
 `encode_store(name, job)` in the encoder and a **Send to panel** button that becomes the default, keeping
 Frame/Start as extras.
@@ -288,7 +288,7 @@ uploadmylaser/
 │   ├── teacher/                 # W5
 │   └── serial-test.html         # Phase 0 spike page
 ├── test/
-│   ├── golden/                  # LightBurn .rd files + settings screenshots
+│   ├── golden/                  # reference .rd files
 │   └── fixtures/                # sample SVG/DXF
 └── docs/  HARDWARE.md  DEPLOY.md  TEST_PLAN.md  STUDENT_GUIDE.md
 ```
@@ -296,7 +296,7 @@ uploadmylaser/
 ## 9. Order of operations
 1. Lead: scaffold the repo from uploadmycode, write the contracts and `CLAUDE.md`, and build
    `web/serial-test.html`.
-2. **You: Phase 0** (save the golden RD files in LightBurn, then run the Chromebook replay test).
+2. **You: Phase 0** (save the golden RD files, then run the Chromebook replay test).
 3. Fan out W1, W2, W3, W5 immediately. W4 waits for the Phase 0 results.
 4. W6 once `/api/process` works, then integration, cardboard tests, docs, and deploy.
 

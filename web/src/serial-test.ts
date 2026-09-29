@@ -1,4 +1,4 @@
-// Phase 0 spike: prove the USB transport by replaying LightBurn's own .rd output.
+// Phase 0 spike: prove the USB transport by replaying a known-good .rd file.
 import { LaserLink } from './serial/laser';
 import { unswizzle } from './ruida/swizzle';
 import { initThemeButton } from './theme';
