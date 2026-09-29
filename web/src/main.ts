@@ -471,7 +471,7 @@ function ungroup(): void {
   const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
   if (!lines.length) return say('Nothing in this file to ungroup.');
   const pieces = splitPieces(lines);
-  if (pieces.length < 2) return say('This file is already one piece. (Holes and anything inside an outline stay with it.)');
+  if (pieces.length < 2) return say('This file is already one piece.');
   if (pieces.length > MAX_PIECES) return say(`This file has ${pieces.length} pieces. Ungroup works up to ${MAX_PIECES}.`);
   if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`That would be more than ${MAX_PARTS} parts in one design.`);
   const name = p.source.name.replace(/\.(dxf|svg)$/i, '');

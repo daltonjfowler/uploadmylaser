@@ -1,7 +1,7 @@
 // Ungroup: split one file part into pieces, using the lines the server already made for it (bed mm).
-// A piece is one outline plus everything inside it (holes, engraving, marks), so a part with holes
-// stays whole. Loose lines that meet end to end (AutoCAD LINEs) are joined first, so a box drawn as
-// four lines is one box. Each piece becomes a small SVG in the same black/red/blue as Box and Circle.
+// Every shape is its own piece, holes too (like LightBurn; Dalton, 2026-09-29). The one exception is an
+// engraved shape's holes: alone, the middle of an engraved "O" would fill solid. Loose lines that meet
+// end to end (AutoCAD LINEs) are joined first, so a box drawn as four lines is one box. Each piece becomes a small SVG in the same black/red/blue as Box and Circle.
 // No DOM, so Node tests can load it.
 import type { OpKind } from '../../shared/contracts';
 
@@ -84,12 +84,14 @@ export function splitPieces(lines: Line[]): Piece[] {
   for (const s of shapes) s.area = (s.box[2] - s.box[0]) * (s.box[3] - s.box[1]);
   shapes.sort((a, b) => b.area - a.area);
 
-  // each shape goes with the smallest outline around it; shapes inside nothing are the pieces
+  // an engraved shape goes with the smallest engraved outline around it; everything else is its own piece
+  const engraved = (s: Shape) => s.lines.every((l) => l.kind === 'engrave');
   const owner = new Map<Shape, Shape>();
   shapes.forEach((s, i) => {
+    if (!engraved(s)) return;
     for (let j = i - 1; j >= 0; j--) { // bigger ones come first, so the first hit going back is the smallest
       const t = shapes[j];
-      if (!t.poly || t === s) continue;
+      if (!t.poly || t === s || !engraved(t)) continue;
       const [a0, b0, a1, b1] = s.box;
       const [c0, d0, c1, d1] = t.box;
       if (a0 < c0 || b0 < d0 || a1 > c1 || b1 > d1) continue;
