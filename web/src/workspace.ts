@@ -47,8 +47,8 @@ export interface WorkspaceEvents {
   onDimClick(which: Dim, at: { x: number; y: number }, mm: number): void;
   /** The Line or Curve tool finished a drawing (bed mm). */
   onDrawn(tool: 'line' | 'curve', pts: [number, number][], closed: boolean): void;
-  /** A box dragged on empty bed: the parts it picked (`add`: Shift was held, keep what was selected). */
-  onBoxSelect(ids: number[], add: boolean): void;
+  /** A box dragged on empty bed: the parts it picked. */
+  onBoxSelect(ids: number[]): void;
   /** Right click: open the menu at `at` (css px in the page). The part under the pointer is selected first. */
   onMenu(at: { x: number; y: number }): void;
 }
@@ -91,7 +91,6 @@ export class Workspace {
     | { kind: 'pinch'; d0: number; mx: number; my: number; s0: number }
     | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
     | null = null;
-  private space = false; // Space held: a left drag pans, like LightBurn
   private hidden = new Set<OpKind>(); // colours not drawn (they still run on the laser)
   /** Fingers (or pens/mice) currently down, for pinch zoom. */
   private pointers = new Map<number, { x: number; y: number }>();
@@ -119,10 +118,6 @@ export class Workspace {
     canvas.addEventListener('wheel', this.wheel, { passive: false });
     canvas.addEventListener('dblclick', () => this.finishDraft());
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    const typing = (e: KeyboardEvent) => (e.target as HTMLElement).closest?.('input, select, textarea, button');
-    window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !typing(e)) { this.space = true; e.preventDefault(); } });
-    window.addEventListener('keyup', (e) => { if (e.code === 'Space') this.space = false; });
-    window.addEventListener('blur', () => { this.space = false; });
     onThemeChange(() => this.draw());
   }
 
@@ -392,7 +387,7 @@ export class Workspace {
       this.draw();
       return;
     }
-    if (e.button === 1 || (e.button === 0 && this.space)) {
+    if (e.button === 1) {
       this.gesture = { kind: 'pan', startX: p.x, startY: p.y, ox: this.view.ox, oy: this.view.oy };
       return;
     }
@@ -448,8 +443,8 @@ export class Workspace {
       return;
     }
     if (e.button === 0 && (this.selected !== null || this.group.length) && !e.shiftKey) this.ev.onSelect(null);
-    // a finger pans; a mouse or pen drags a selection box (pan with the middle button or Space)
-    this.gesture = e.pointerType === 'touch'
+    // a finger or Shift+drag pans; a mouse or pen drags a selection box (the middle button pans too)
+    this.gesture = e.pointerType === 'touch' || e.shiftKey
       ? { kind: 'pan', startX: p.x, startY: p.y, ox: this.view.ox, oy: this.view.oy }
       : { kind: 'box', x0: p.mx, y0: p.my, x1: p.mx, y1: p.my };
   };
@@ -527,7 +522,7 @@ export class Workspace {
     }
     this.gesture = null;
     if (gs?.kind === 'box') {
-      this.finishBox(gs, e.shiftKey);
+      this.finishBox(gs);
       return;
     }
     if (!gs || gs.kind === 'pan' || !lv) {
@@ -547,7 +542,7 @@ export class Workspace {
   };
 
   /** Left to right picks parts wholly inside the box; right to left also picks parts it touches (LightBurn). */
-  private finishBox(b: { x0: number; y0: number; x1: number; y1: number }, add: boolean): void {
+  private finishBox(b: { x0: number; y0: number; x1: number; y1: number }): void {
     const [x0, x1] = [Math.min(b.x0, b.x1), Math.max(b.x0, b.x1)];
     const [y0, y1] = [Math.min(b.y0, b.y1), Math.max(b.y0, b.y1)];
     this.draw();
@@ -560,7 +555,7 @@ export class Workspace {
         ? q[0] <= x1 && q[2] >= x0 && q[1] <= y1 && q[3] >= y0
         : q[0] >= x0 && q[2] <= x1 && q[1] >= y0 && q[3] <= y1;
     }).map((p) => p.id);
-    this.ev.onBoxSelect(ids, add);
+    this.ev.onBoxSelect(ids);
   }
 
   /** Drop any local preview (the server answered, or the change was cancelled). */

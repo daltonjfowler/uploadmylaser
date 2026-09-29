@@ -27,6 +27,7 @@
 
   <nav class="toolbar" aria-label="File and edit">
     <button id="open" data-hint="Open: start over with this file. Clears the workspace.">📂 Open…</button>
+    <button id="save" data-hint="Save: keep your whole design as a file (.uml). Open it later, on any computer, to carry on.">💾 Save</button>
     <button id="import" data-hint="Import: add this file to what's already here, like a logo next to your name.">➕ Import…</button>
     <span class="sep"></span>
     <button id="undo" disabled data-hint="Undo the last change. (Ctrl+Z)">↶ Undo</button>
@@ -42,8 +43,8 @@
     <button id="zoomIn" data-hint="Zoom in.">+</button>
     <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
     <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
-    <input type="file" id="openFile" accept=".svg,.dxf,image/svg+xml" hidden>
-    <input type="file" id="importFile" accept=".svg,.dxf,image/svg+xml" hidden>
+    <input type="file" id="openFile" accept=".svg,.dxf,.uml,image/svg+xml" hidden>
+    <input type="file" id="importFile" accept=".svg,.dxf,.uml,image/svg+xml" hidden>
   </nav>
 
   <div class="sizebar" id="sizebar">
@@ -127,6 +128,7 @@
         <label class="panelname" id="panelNameRow" hidden data-hint="The name your job gets in the laser's file list. Up to 8 letters or numbers.">Name on the laser <input id="panelName" maxlength="8" autocomplete="off" spellcheck="false"></label>
         <button id="send" class="go wide" disabled data-hint="Loads your design onto the laser. It does NOT start it: you press Frame, then Start, on the laser itself.">Send to laser</button>
         <progress id="progress" max="1" value="0" hidden></progress>
+        <button id="downloadRd" class="wide" disabled data-hint="No laser in this room? Save the finished job as a laser file (.rd) and give it to your teacher. Or use Save to keep the design and open it again later.">⬇ Download laser file</button>
         <button id="stop" class="stop wide" hidden>STOP</button>
       </section>
     </aside>

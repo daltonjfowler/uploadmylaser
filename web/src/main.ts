@@ -79,8 +79,8 @@ const ws = new Workspace($<HTMLCanvasElement>('ws'), {
       { xMm: round(vb.x + vb.w), yMm: round(vb.y) });
     setTool('select');
   },
-  onBoxSelect: (ids, add) => {
-    const all = new Set([...(add ? selection() : []), ...withGroups(ids)]);
+  onBoxSelect: (ids) => {
+    const all = new Set(withGroups(ids));
     const pick = parts.map((p) => p.id).filter((x) => all.has(x));
     if (pick.length <= 1) select(pick[0] ?? null);
     else setGroup(pick);
@@ -349,6 +349,108 @@ async function readFile(f: File): Promise<Source | null> {
   return { kind: 'file', name: f.name, fileType: 'dxf', data };
 }
 
+// ---------- design files (.uml): save the workspace, open it later or on another computer ----------
+
+const DESIGN_EXT = '.uml';
+const DESIGN_KIND = 'uploadmylaser design';
+
+/** First typed text, else the first file's name, as a file-name-safe word. */
+function designName(): string {
+  const text = parts.find((p) => p.source.kind === 'text')?.source as { text: TextSpec } | undefined;
+  const file = parts.find((p) => p.source.kind === 'file')?.source as { name: string } | undefined;
+  const raw = text?.text.value || file?.name.replace(/\.[^.]*$/, '').replace(/ piece \d+$/, '') || 'design';
+  return raw.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'design';
+}
+
+/** Chrome asks where to save; other browsers download. False when the student cancelled. */
+async function saveBlob(blob: Blob, name: string, what: string, ext: string): Promise<boolean> {
+  const picker = (window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<{ createWritable(): Promise<{ write(b: Blob): Promise<void>; close(): Promise<void> }> }> }).showSaveFilePicker;
+  if (picker) {
+    try {
+      const h = await picker({ suggestedName: name, types: [{ description: what, accept: { 'application/octet-stream': [ext] } }] });
+      const out = await h.createWritable();
+      await out.write(blob);
+      await out.close();
+      return true;
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return false;
+      // blocked (some school policies): fall back to a normal download
+    }
+  }
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  return true;
+}
+
+$('save').onclick = async () => {
+  if (!parts.length) return warn('Add something to the workspace first.');
+  const file = { kind: DESIGN_KIND, version: 1, savedAt: new Date().toISOString(), materialId, colorMap, powerChoice, parts };
+  const ok = await saveBlob(new Blob([JSON.stringify(file)], { type: 'application/json' }), designName() + DESIGN_EXT, 'uploadmylaser design', DESIGN_EXT);
+  if (ok) warn('Saved. Open it later with Open…, on this computer or another one.', '✓');
+};
+
+/** A saved design, checked enough that a broken or odd file can't break the page (the server checks the rest). */
+function readDesign(text: string): { parts: DesignPart[]; materialId: string; colorMap: Record<string, ColorChoice>; powerChoice: Partial<Record<OpKind, number>> } | null {
+  let d: unknown;
+  try { d = JSON.parse(text); } catch { return null; }
+  const o = d as Record<string, unknown>;
+  if (!o || o.kind !== DESIGN_KIND || !Array.isArray(o.parts)) return null;
+  const okPart = (p: unknown): p is DesignPart => {
+    const q = p as Record<string, unknown>;
+    const s = q?.source as Record<string, unknown> | undefined;
+    return !!q && typeof q.id === 'number' && [q.xMm, q.yMm, q.scale].every((v) => typeof v === 'number' && Number.isFinite(v))
+      && [0, 90, 180, 270].includes(q.rotateDeg as number) && !!s && ['file', 'text', 'shape', 'path'].includes(s.kind as string)
+      && (s.kind !== 'file' || (typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf')));
+  };
+  const ps = o.parts.filter(okPart).slice(0, MAX_PARTS);
+  if (!ps.length) return null;
+  const plain = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, never> : {});
+  return { parts: ps, materialId: typeof o.materialId === 'string' ? o.materialId : '', colorMap: plain(o.colorMap), powerChoice: plain(o.powerChoice) };
+}
+
+/** Put a saved design's parts on the workspace with fresh ids (so Import can add one next to another). */
+function placeDesign(d: NonNullable<ReturnType<typeof readDesign>>, replace: boolean): void {
+  const groups = new Map<number, number>(); // old group id -> new, so groups stay groups
+  const fresh = (old: number) => { if (!groups.has(old)) groups.set(old, nextId++); return groups.get(old)!; };
+  const added = d.parts.map((p) => ({ ...p, id: nextId++, ...(p.groupId !== undefined ? { groupId: fresh(p.groupId) } : {}) }));
+  if ((replace ? 0 : parts.length) + added.length > MAX_PARTS) return warn(`That would be more than ${MAX_PARTS} parts.`);
+  if (replace) {
+    parts = [];
+    result = null;
+    resultIds = [];
+    colorMap = { ...d.colorMap };
+    powerChoice = { ...d.powerChoice };
+    if (materials.some((m) => m.id === d.materialId)) materialId = d.materialId;
+  } else {
+    colorMap = { ...d.colorMap, ...colorMap };
+  }
+  parts.push(...added);
+  select(null);
+  changed();
+  if (replace && d.materialId && !materials.some((m) => m.id === d.materialId)) warn('This design used a material this laser does not have. Pick a material.');
+  else warn(replace ? 'Design opened. Carry on where you left off.' : `Added ${added.length} parts from that design.`, '✓');
+}
+
+async function openAny(f: File, replace: boolean): Promise<void> {
+  if (f.name.toLowerCase().endsWith(DESIGN_EXT)) {
+    if (f.size > MAX_UPLOAD_BYTES * 2) return warn('That design file is too big.');
+    const d = readDesign(await f.text());
+    if (!d) return warn('That is not an uploadmylaser design file, or it is damaged.');
+    placeDesign(d, replace);
+    return;
+  }
+  const src = await readFile(f);
+  if (!src) return;
+  if (replace) {
+    parts = [];
+    colorMap = {};
+    result = null;
+    resultIds = [];
+  }
+  addPart(src);
+}
+
 $('open').onclick = () => {
   if (parts.length && !confirm('Start over with a new file? This clears everything on the workspace.')) return;
   $<HTMLInputElement>('openFile').click();
@@ -360,21 +462,14 @@ $<HTMLInputElement>('openFile').onchange = async (ev) => {
   const f = input.files?.[0];
   input.value = '';
   if (!f) return;
-  const src = await readFile(f);
-  if (!src) return;
-  parts = [];
-  colorMap = {};
-  result = null;
-  resultIds = [];
-  addPart(src);
+  await openAny(f, true);
 };
 $<HTMLInputElement>('importFile').onchange = async (ev) => {
   const input = ev.target as HTMLInputElement;
   const f = input.files?.[0];
   input.value = '';
   if (!f) return;
-  const src = await readFile(f);
-  if (src) addPart(src);
+  await openAny(f, false);
 };
 
 $('toolText').onclick = () => {
@@ -1548,6 +1643,7 @@ function updateButtons(): void {
   if (toPanel && !panelNameTyped && document.activeElement !== nameBox) nameBox.value = suggestedPanelName();
   const named = !toPanel || !!cleanPanelName(nameBox.value);
   $<HTMLButtonElement>('send').disabled = !(hasJob && connected && idle && ack && named);
+  $<HTMLButtonElement>('downloadRd').disabled = !hasJob;
   const steps: [string, boolean][] = [
     ['Pick your material', !!materialId],
     ['Enter the class phrase', !!getPhrase()],
@@ -1599,6 +1695,15 @@ async function sendBytes(b64: string): Promise<boolean> {
     render();
   }
 }
+
+// The job as a Ruida .rd file, for a laser in another room (the panel's USB port, or RDWorks).
+// It is the same file Send would load, with the teacher's limits already applied.
+$('downloadRd').onclick = async () => {
+  if (!result?.rd || pending || result.errors.length) return;
+  const name = (cleanPanelName($<HTMLInputElement>('panelName').value) || suggestedPanelName() || 'DESIGN').replace(/ /g, '');
+  const ok = await saveBlob(new Blob([fromBase64(result.rd) as BlobPart], { type: 'application/octet-stream' }), `${name}.rd`, 'Ruida laser file', '.rd');
+  if (ok) warn('Laser file saved. Give it to your teacher: it opens on the laser from a USB stick.', '✓');
+};
 
 $('send').onclick = async () => {
   if (!result?.rd) return;
@@ -1706,7 +1811,7 @@ function defaultHint(): void {
       ? 'Open an SVG or DXF file, or use Text, Box or Circle on the left.'
       : !getPhrase()
         ? 'Arrange your design. When you are ready, enter the class phrase in the Laser panel to check it.'
-        : 'Drag parts to move them. Drag on empty bed to box-select; right-click for more. Scroll to zoom; middle button or Space+drag to pan. Then connect the laser and Send.';
+        : 'Drag parts to move them. Drag on empty bed to box-select; right-click for more. Scroll to zoom; Shift+drag or the middle button pans. Then connect the laser and Send.';
 }
 
 // ---------- saving the design on this Chromebook ----------
