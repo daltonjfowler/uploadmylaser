@@ -59,7 +59,7 @@ label.block { display: flex; flex-direction: column; align-items: stretch; gap: 
 body.app { height: 100vh; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; overflow: hidden; }
 .titlebar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--top); color: var(--ink); border-bottom: 1px solid var(--line); }
 .brand { margin-right: auto; font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; display: inline-flex; align-items: center; gap: 10px; }
-.brand img { border-radius: 16px; }
+.brand img { border-radius: 12px; }
 .toolbar, .sizebar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; background: var(--chrome2); color: var(--chrome-ink); border-bottom: 1px solid var(--line); }
 .toolbar button { padding: 5px 11px; }
 .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 6px; }
@@ -121,7 +121,7 @@ button.toplink { background: transparent; font: inherit; font-size: .9rem; curso
   body.app { overflow-x: hidden; }
   .titlebar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
   .brand { font-size: 1rem; flex: 1 1 100%; margin-right: 0; }
-  .brand img { width: 56px; height: 56px; border-radius: 12px; }
+  .brand img { width: 42px; height: 42px; border-radius: 9px; }
   .titlebar button, .toplink { padding: 5px 8px; font-size: .85rem; }
   .toolbar, .sizebar { padding: 5px 6px; gap: 4px; }
   .toolbar button { padding: 5px 8px; }
@@ -146,8 +146,8 @@ button.toplink { background: transparent; font: inherit; font-size: .9rem; curso
 .pagehead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .pagehead .themebtn { padding: 5px 10px; }
 .pagehead h1 { display: inline-flex; align-items: center; gap: 10px; }
-.pagehead .logo { border-radius: 20px; }
-@media (max-width: 640px) { .pagehead .logo { width: 56px; height: 56px; border-radius: 12px; } }
+.pagehead .logo { border-radius: 15px; }
+@media (max-width: 640px) { .pagehead .logo { width: 42px; height: 42px; border-radius: 9px; } }
 
 /* ---------- teacher page: the same flow and look as uploadmycode's ---------- */
 body.teacher { max-width: 46rem; padding: 1.5rem 1.25rem 3rem; line-height: 1.5; }

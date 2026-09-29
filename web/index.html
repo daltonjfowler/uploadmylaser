@@ -16,7 +16,7 @@
 </head>
 <body class="app">
   <header class="titlebar">
-    <strong class="brand"><img src="/icon.svg" data-logo alt="" width="72" height="72">uploadmylaser</strong>
+    <strong class="brand"><img src="/icon.svg" data-logo alt="" width="54" height="54">uploadmylaser</strong>
     <button id="help" class="toplink" type="button" data-hint="Shortcuts and tips.">ⓘ Help</button>
     <a class="toplink" href="/teacher/" data-hint="For teachers: presets, machine settings and the class phrase.">Teacher</a>
     <span id="status" class="pill">Laser not connected</span>
@@ -128,6 +128,7 @@
         <label class="panelname" id="panelNameRow" hidden data-hint="The name your job gets in the laser's file list. Up to 8 letters or numbers.">Name on the laser <input id="panelName" maxlength="8" autocomplete="off" spellcheck="false"></label>
         <button id="send" class="go wide" disabled data-hint="Loads your design onto the laser. It does NOT start it: you press Frame, then Start, on the laser itself.">Send to laser</button>
         <progress id="progress" max="1" value="0" hidden></progress>
+        <button id="exportTeacher" class="wide" data-hint="One file for your teacher: your design, the laser file (when it is ready) and a note. Use it when there is no laser here or something went wrong.">📦 Export for teacher</button>
         <button id="downloadRd" class="wide" disabled data-hint="No laser in this room? Save the finished job as a laser file (.rd) and give it to your teacher. Or use Save to keep the design and open it again later.">⬇ Download laser file</button>
         <button id="stop" class="stop wide" hidden>STOP</button>
       </section>

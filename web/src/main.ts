@@ -18,6 +18,7 @@ import { LaserLink } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
+import { zip } from './zip';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -383,10 +384,13 @@ async function saveBlob(blob: Blob, name: string, what: string, ext: string): Pr
   return true;
 }
 
+function designJson(): string {
+  return JSON.stringify({ kind: DESIGN_KIND, version: 1, savedAt: new Date().toISOString(), materialId, colorMap, powerChoice, parts });
+}
+
 $('save').onclick = async () => {
   if (!parts.length) return warn('Add something to the workspace first.');
-  const file = { kind: DESIGN_KIND, version: 1, savedAt: new Date().toISOString(), materialId, colorMap, powerChoice, parts };
-  const ok = await saveBlob(new Blob([JSON.stringify(file)], { type: 'application/json' }), designName() + DESIGN_EXT, 'uploadmylaser design', DESIGN_EXT);
+  const ok = await saveBlob(new Blob([designJson()], { type: 'application/json' }), designName() + DESIGN_EXT, 'uploadmylaser design', DESIGN_EXT);
   if (ok) warn('Saved. Open it later with Open…, on this computer or another one.', '✓');
 };
 
@@ -1703,6 +1707,41 @@ $('downloadRd').onclick = async () => {
   const name = (cleanPanelName($<HTMLInputElement>('panelName').value) || suggestedPanelName() || 'DESIGN').replace(/ /g, '');
   const ok = await saveBlob(new Blob([fromBase64(result.rd) as BlobPart], { type: 'application/octet-stream' }), `${name}.rd`, 'Ruida laser file', '.rd');
   if (ok) warn('Laser file saved. Give it to your teacher: it opens on the laser from a USB stick.', '✓');
+};
+
+// Export for teacher: one zip with the design (to open, fix or send) and, when it is ready, the laser file,
+// plus a note saying what state it was in. Works even when something is wrong: that's when it's needed.
+$('exportTeacher').onclick = async () => {
+  if (!parts.length) return warn('Add something to the workspace first.');
+  const name = designName();
+  const enc = new TextEncoder();
+  const ready = !!result?.rd && !pending && !result.errors.length;
+  const rdName = `${(cleanPanelName($<HTMLInputElement>('panelName').value) || suggestedPanelName() || 'DESIGN').replace(/ /g, '')}.rd`;
+  const mat = materials.find((x) => x.id === materialId);
+  const problems = [...(result?.errors ?? []), ...(result?.warnings ?? []), ...(pending ? ['It was still updating when this was saved.'] : []), ...(!ready && !getPhrase() ? ['The class phrase was not entered, so the laser file could not be made.'] : [])];
+  const note = [
+    'uploadmylaser: a job for your teacher',
+    '',
+    `Design: ${name}`,
+    `Saved: ${new Date().toLocaleString()}`,
+    `Material: ${mat?.name ?? 'not picked'}`,
+    `Laser time: ${ready ? `about ${fmtTime(result!.estimateS)}` : 'not ready'}`,
+    '',
+    problems.length ? 'Problems when it was saved:' : 'No problems when it was saved.',
+    ...problems.map((t) => `- ${t}`),
+    '',
+    'Files:',
+    `- ${name}${DESIGN_EXT}: open it at uploadmylaser.com with Open... to look at it, fix it or send it.`,
+    ready ? `- ${rdName}: the finished laser job, for the laser's USB port. It has the class limits in it.` : '- No laser file: open the design to fix it first.',
+    '',
+  ].join('\r\n');
+  const files = [
+    { name: `${name}${DESIGN_EXT}`, data: enc.encode(designJson()) },
+    ...(ready ? [{ name: rdName, data: fromBase64(result!.rd!) }] : []),
+    { name: 'READ ME.txt', data: enc.encode(note) },
+  ];
+  const ok = await saveBlob(new Blob([zip(files) as BlobPart], { type: 'application/zip' }), `${name}-for-teacher.zip`, 'Zip file', '.zip');
+  if (ok) warn(ready ? 'Saved one file for your teacher: your design and the laser file.' : 'Saved one file for your teacher: your design and a note about what is wrong.', '✓');
 };
 
 $('send').onclick = async () => {
