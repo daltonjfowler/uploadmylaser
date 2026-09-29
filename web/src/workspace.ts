@@ -47,6 +47,10 @@ export interface WorkspaceEvents {
   onDimClick(which: Dim, at: { x: number; y: number }, mm: number): void;
   /** The Line or Curve tool finished a drawing (bed mm). */
   onDrawn(tool: 'line' | 'curve', pts: [number, number][], closed: boolean): void;
+  /** A box dragged on empty bed: the parts it picked (`add`: Shift was held, keep what was selected). */
+  onBoxSelect(ids: number[], add: boolean): void;
+  /** Right click: open the menu at `at` (css px in the page). The part under the pointer is selected first. */
+  onMenu(at: { x: number; y: number }): void;
 }
 
 /** A local, not-yet-processed change to one part: its geometry is drawn mapped from `from` onto `to`. */
@@ -76,7 +80,6 @@ export class Workspace {
   private jobBad = false;
   private headDot = true;
   private zero = { right: true, bottom: false }; // which bed corner the rulers count from
-  private busy = false;
   /** px per mm, and the screen position (css px) of bed 0,0 */
   private view = { s: 1, ox: RULER + 10, oy: RULER + 10 };
   private fitted = false;
@@ -86,7 +89,10 @@ export class Workspace {
     | { kind: 'resize'; ids: number[]; box: Box; handle: Handle }
     | { kind: 'pan'; startX: number; startY: number; ox: number; oy: number }
     | { kind: 'pinch'; d0: number; mx: number; my: number; s0: number }
+    | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
     | null = null;
+  private space = false; // Space held: a left drag pans, like LightBurn
+  private hidden = new Set<OpKind>(); // colours not drawn (they still run on the laser)
   /** Fingers (or pens/mice) currently down, for pinch zoom. */
   private pointers = new Map<number, { x: number; y: number }>();
   private touchSlop = 0; // extra px of handle hit area for fingers
@@ -112,6 +118,11 @@ export class Workspace {
     canvas.addEventListener('pointercancel', this.up);
     canvas.addEventListener('wheel', this.wheel, { passive: false });
     canvas.addEventListener('dblclick', () => this.finishDraft());
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    const typing = (e: KeyboardEvent) => (e.target as HTMLElement).closest?.('input, select, textarea, button');
+    window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !typing(e)) { this.space = true; e.preventDefault(); } });
+    window.addEventListener('keyup', (e) => { if (e.code === 'Space') this.space = false; });
+    window.addEventListener('blur', () => { this.space = false; });
     onThemeChange(() => this.draw());
   }
 
@@ -241,8 +252,9 @@ export class Workspace {
     this.draw();
   }
 
-  setBusy(on: boolean): void {
-    this.busy = on;
+  /** Colours to leave out of the drawing. Only the view: the laser still runs them. */
+  setHidden(kinds: Set<OpKind>): void {
+    this.hidden = new Set(kinds);
     this.draw();
   }
 
@@ -380,6 +392,18 @@ export class Workspace {
       this.draw();
       return;
     }
+    if (e.button === 1 || (e.button === 0 && this.space)) {
+      this.gesture = { kind: 'pan', startX: p.x, startY: p.y, ox: this.view.ox, oy: this.view.oy };
+      return;
+    }
+    if (e.button === 2) {
+      this.pointers.delete(e.pointerId);
+      const under = this.partAt(p.mx, p.my);
+      if (under?.box && under.id !== this.selected && !this.group.includes(under.id)) this.ev.onSelect(under.id);
+      const r = this.canvas.getBoundingClientRect();
+      this.ev.onMenu({ x: r.left + p.x, y: r.top + p.y });
+      return;
+    }
     const dim = e.button === 0 && !e.shiftKey ? this.dimAt(p.x, p.y) : undefined;
     if (dim) {
       this.pointers.delete(e.pointerId);
@@ -416,11 +440,18 @@ export class Workspace {
     }
     if (part?.box) {
       if (part.id !== this.selected) this.ev.onSelect(part.id);
-      this.gesture = { kind: 'move', ids: [part.id], box: part.box, startX: p.mx, startY: p.my };
+      // a grouped part selects its whole group, which then moves together
+      const gb = this.group.length > 1 && this.group.includes(part.id) ? this.groupBox(false) : null;
+      this.gesture = gb
+        ? { kind: 'move', ids: [...this.group], box: gb, startX: p.mx, startY: p.my }
+        : { kind: 'move', ids: [part.id], box: part.box, startX: p.mx, startY: p.my };
       return;
     }
     if (e.button === 0 && (this.selected !== null || this.group.length) && !e.shiftKey) this.ev.onSelect(null);
-    this.gesture = { kind: 'pan', startX: p.x, startY: p.y, ox: this.view.ox, oy: this.view.oy };
+    // a finger pans; a mouse or pen drags a selection box (pan with the middle button or Space)
+    this.gesture = e.pointerType === 'touch'
+      ? { kind: 'pan', startX: p.x, startY: p.y, ox: this.view.ox, oy: this.view.oy }
+      : { kind: 'box', x0: p.mx, y0: p.my, x1: p.mx, y1: p.my };
   };
 
   /** Two fingers down: zoom about their midpoint and pan as it moves. Any drag in progress is dropped. */
@@ -460,6 +491,9 @@ export class Workspace {
       // the bed point that started under the fingers' midpoint stays under it
       this.view = { s, ox: (a.x + b.x) / 2 - gs.mx * s, oy: (a.y + b.y) / 2 - gs.my * s };
       this.clampView();
+    } else if (gs.kind === 'box') {
+      gs.x1 = p.mx;
+      gs.y1 = p.my;
     } else if (gs.kind === 'pan') {
       this.view.ox = gs.ox + p.x - gs.startX;
       this.view.oy = gs.oy + p.y - gs.startY;
@@ -492,6 +526,10 @@ export class Workspace {
       return;
     }
     this.gesture = null;
+    if (gs?.kind === 'box') {
+      this.finishBox(gs, e.shiftKey);
+      return;
+    }
     if (!gs || gs.kind === 'pan' || !lv) {
       this.live = null;
       return;
@@ -507,6 +545,23 @@ export class Workspace {
     else this.live = null;
     this.draw();
   };
+
+  /** Left to right picks parts wholly inside the box; right to left also picks parts it touches (LightBurn). */
+  private finishBox(b: { x0: number; y0: number; x1: number; y1: number }, add: boolean): void {
+    const [x0, x1] = [Math.min(b.x0, b.x1), Math.max(b.x0, b.x1)];
+    const [y0, y1] = [Math.min(b.y0, b.y1), Math.max(b.y0, b.y1)];
+    this.draw();
+    if ((x1 - x0) * this.view.s < 4 && (y1 - y0) * this.view.s < 4) return; // a click, not a drag
+    const touching = b.x1 < b.x0;
+    const ids = this.parts.filter((p) => {
+      const q = p.box;
+      if (!q) return false;
+      return touching
+        ? q[0] <= x1 && q[2] >= x0 && q[1] <= y1 && q[3] >= y0
+        : q[0] >= x0 && q[2] <= x1 && q[1] >= y0 && q[3] <= y1;
+    }).map((p) => p.id);
+    this.ev.onBoxSelect(ids, add);
+  }
 
   /** Drop any local preview (the server answered, or the change was cancelled). */
   clearLive(): void {
@@ -585,18 +640,31 @@ export class Workspace {
     }
 
     this.drawSelection(); // last, so handles sit above the laser-head dot
+    const gb = this.gesture;
+    if (gb?.kind === 'box') {
+      g.save();
+      g.setLineDash(gb.x1 < gb.x0 ? [5, 4] : []); // dashed: touching also counts
+      g.strokeStyle = SEL;
+      g.fillStyle = 'rgba(124,58,237,0.08)';
+      g.lineWidth = 1;
+      const bx = ox + Math.min(gb.x0, gb.x1) * s;
+      const by = oy + Math.min(gb.y0, gb.y1) * s;
+      g.fillRect(bx, by, Math.abs(gb.x1 - gb.x0) * s, Math.abs(gb.y1 - gb.y0) * s);
+      g.strokeRect(bx + 0.5, by + 0.5, Math.abs(gb.x1 - gb.x0) * s, Math.abs(gb.y1 - gb.y0) * s);
+      g.restore();
+    }
+    if (this.hidden.size) {
+      g.font = '600 12px system-ui, sans-serif';
+      const t = 'Some colours are hidden. They still run on the laser.';
+      const tw = g.measureText(t).width + 20;
+      g.fillStyle = 'rgba(180,83,9,.92)';
+      g.fillRect(RULER + 10, ch - 34, tw, 24);
+      g.fillStyle = '#fff';
+      g.fillText(t, RULER + 20, ch - 17);
+    }
     this.drawDraft();
     this.drawRulers(cw, ch, grid, th);
 
-    if (this.busy) {
-      g.fillStyle = 'rgba(17,24,39,.75)';
-      g.font = '600 13px system-ui, sans-serif';
-      const t = 'Working…';
-      const tw = g.measureText(t).width + 20;
-      g.fillRect(cw - tw - 10, ch - 34, tw, 24);
-      g.fillStyle = '#fff';
-      g.fillText(t, cw - tw, ch - 17);
-    }
   }
 
   /** The Line/Curve tool's points so far, and a rubber band to the pointer. */
@@ -684,6 +752,7 @@ export class Workspace {
     const Y = (y: number) => oy + (b[1] + (y - a[1]) * ky) * s;
 
     for (const layer of p.layers) {
+      if (this.hidden.has(layer.kind)) continue;
       g.beginPath();
       for (const path of layer.paths) path.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
       if (layer.kind === 'engrave') {
@@ -708,7 +777,8 @@ export class Workspace {
       g.stroke();
       g.restore();
     }
-    if (p.sketch) this.drawSketch(p.sketch, this.liveBox(p)!);
+    const sk = p.sketch as (Sketch & { color?: string }) | undefined;
+    if (sk && ![...this.hidden].some((k) => OP_COLORS[k] === sk.color)) this.drawSketch(sk, this.liveBox(p)!);
 
   }
 

@@ -34,7 +34,8 @@
     <span class="sep"></span>
     <button id="selectAll" data-hint="Select every part, to move them together. (Ctrl+A) Shift+click adds or removes one part.">⬚ Select all</button>
     <button id="rotate" data-hint="Turn the selected part a quarter turn.">⟳ Rotate</button>
-    <button id="ungroup" data-hint="Ungroup: split the selected file into its separate shapes, to move or delete each one.">⧉ Ungroup</button>
+    <button id="group" data-hint="Group: tie the selected parts together, so clicking one selects and moves them all. (Drag a box on the bed, or Shift+click, to select several.)">▣ Group</button>
+    <button id="ungroup" data-hint="Ungroup: untie a group, or split the selected file into its separate shapes, to move or delete each one.">⧉ Ungroup</button>
     <button id="delete" data-hint="Remove the selected part. (Delete key)">🗑 Delete</button>
     <span class="sep"></span>
     <button id="zoomOut" data-hint="Zoom out. (Mouse wheel works too)">−</button>
@@ -85,6 +86,8 @@
     <section class="stage">
       <canvas id="ws" aria-label="Laser bed"></canvas>
       <div id="toast" class="toast" role="alert" hidden></div>
+      <div id="ctxmenu" class="ctxmenu" role="menu" hidden></div>
+      <div id="busy" class="busy" role="status" hidden><span class="spin" aria-hidden="true"></span>Updating the laser lines…</div>
       <div id="dimBox" class="dimbox" hidden>
         <label><span id="dimLabel">Width</span> <input id="dimEdit" type="text" inputmode="decimal" autocomplete="off"> <span class="u">mm</span></label>
         <span class="small"><kbd>Enter</kbd> sets it · <kbd>Esc</kbd> cancels</span>

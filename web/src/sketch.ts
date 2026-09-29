@@ -15,7 +15,8 @@ export type Source =
   | { kind: 'shape'; shape: ShapeKind; wMm: number; hMm: number; op: OpKind }
   /** Library shapes and the Line/Curve tools: an SVG path stretched from its bounds `vb` to wMm x hMm. */
   | { kind: 'path'; name: string; d: string; vb: ViewBox; closed: boolean; wMm: number; hMm: number; op: OpKind };
-export interface DesignPart extends Placement { id: number; source: Source }
+/** groupId: parts grouped with the Group button select and move together */
+export interface DesignPart extends Placement { id: number; source: Source; groupId?: number }
 
 const PX_MM = 25.4 / 96;
 const UNITS: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: PX_MM, '': PX_MM };

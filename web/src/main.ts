@@ -38,6 +38,7 @@ let group: number[] = [];      // several parts selected (Ctrl+A, Shift+click); 
 let color: OpKind = 'cut';
 let colorMap: Record<string, ColorChoice> = {};
 let powerChoice: Partial<Record<OpKind, number>> = {};
+const hiddenOps = new Set<OpKind>(); // only the view: hidden colours still run on the laser
 let result: ProcessResponse | null = null;
 let resultIds: number[] = []; // part id for each index in `result`
 let pending = false;          // a change is waiting for the server, so `result` is out of date
@@ -78,6 +79,13 @@ const ws = new Workspace($<HTMLCanvasElement>('ws'), {
       { xMm: round(vb.x + vb.w), yMm: round(vb.y) });
     setTool('select');
   },
+  onBoxSelect: (ids, add) => {
+    const all = new Set([...(add ? selection() : []), ...withGroups(ids)]);
+    const pick = parts.map((p) => p.id).filter((x) => all.has(x));
+    if (pick.length <= 1) select(pick[0] ?? null);
+    else setGroup(pick);
+  },
+  onMenu: (at) => openMenu(at),
 });
 
 // ---------- startup ----------
@@ -193,10 +201,17 @@ function selectAll(): void {
   setGroup(parts.map((p) => p.id));
 }
 
+/** These parts plus every part grouped with any of them. */
+function withGroups(ids: number[]): number[] {
+  const gids = new Set(ids.map((id) => find(id)?.groupId).filter((g) => g !== undefined));
+  return parts.filter((p) => ids.includes(p.id) || (p.groupId !== undefined && gids.has(p.groupId))).map((p) => p.id);
+}
+
 function toggleSelect(id: number): void {
   const now = new Set(selection());
-  if (now.has(id)) now.delete(id);
-  else now.add(id);
+  const members = withGroups([id]);
+  if (now.has(id)) members.forEach((x) => now.delete(x));
+  else members.forEach((x) => now.add(x));
   const ids = parts.map((p) => p.id).filter((x) => now.has(x));
   if (ids.length <= 1) select(ids[0] ?? null);
   else setGroup(ids);
@@ -463,9 +478,18 @@ $('rotate').onclick = () => {
 };
 $('delete').onclick = deleteSelected;
 $('ungroup').onclick = ungroup;
+$('group').onclick = groupSelected;
 
 /** Replace the selected file with one file per piece, in the same place, from the server's last answer. */
 function ungroup(): void {
+  const grouped = selection().map(find).filter((q): q is DesignPart => q?.groupId !== undefined);
+  if (grouped.length) {
+    grouped.forEach((q) => delete q.groupId);
+    select(null);
+    changed();
+    warn(`Ungrouped ${grouped.length} parts. Click a part to move it on its own.`, '✓');
+    return;
+  }
   const p = find(selected);
   if (!p || p.source.kind !== 'file') return;
   const i = resultIds.indexOf(p.id);
@@ -536,6 +560,8 @@ $('zoomDesign').onclick = () => {
 };
 
 function select(id: number | null): void {
+  const members = id === null ? [] : withGroups([id]);
+  if (members.length > 1) return setGroup(members); // a grouped part brings its whole group
   selected = id;
   if (group.length) {
     group = [];
@@ -549,7 +575,28 @@ function select(id: number | null): void {
   ws.setSelected(id);
   renderSizebar();
   renderColors(); // with many files it shows the selected one's colours
-  $('ungroup').toggleAttribute('disabled', find(id)?.source.kind !== 'file');
+  renderSelectButtons();
+}
+
+function canUngroup(): boolean {
+  const ids = selection();
+  return ids.some((id) => find(id)?.groupId !== undefined) || (ids.length === 1 && find(ids[0])?.source.kind === 'file');
+}
+
+function renderSelectButtons(): void {
+  $('group').toggleAttribute('disabled', selection().length < 2);
+  $('ungroup').toggleAttribute('disabled', !canUngroup());
+}
+
+/** Tie the selected parts together: clicking any of them selects them all. Nothing is merged. */
+function groupSelected(): void {
+  const ids = selection();
+  if (ids.length < 2) return;
+  const gid = nextId++;
+  for (const id of ids) { const q = find(id); if (q) q.groupId = gid; }
+  changed();
+  setGroup(ids);
+  warn(`Grouped ${ids.length} parts. Click any of them to move them together.`, '✓');
 }
 
 /** The colour of a text, shape or line (files carry their own colours). */
@@ -914,6 +961,7 @@ function applyColor(op: OpKind): void {
       const keys = fileColors(q.id).map((c) => c.key);
       if (keys.length) {
         q.source.colors = { ...q.source.colors, ...Object.fromEntries(keys.map((k) => [k, op])) };
+        recolourNow([q.id], 'all', op);
         recoloured = took = true;
       } else notes = ['Wait a moment for the file to be checked, then pick the colour again.'];
     }
@@ -992,7 +1040,17 @@ function renderLayers(): void {
     words.append(name, state);
     pick.append(sw, words);
     pick.onclick = () => applyColor(op);
-    li.append(pick);
+    const eye = document.createElement('button');
+    eye.type = 'button';
+    eye.className = 'eye small' + (hiddenOps.has(op) ? ' off' : '');
+    eye.textContent = hiddenOps.has(op) ? 'Show' : 'Hide';
+    eye.setAttribute('aria-pressed', String(hiddenOps.has(op)));
+    eye.dataset.hint = `${hiddenOps.has(op) ? 'Show' : 'Hide'} the ${OP_LABELS[op]} lines on the screen. Hidden lines still run on the laser.`;
+    eye.onclick = () => toggleHidden(op);
+    const top = document.createElement('div');
+    top.className = 'layertop';
+    top.append(pick, eye);
+    li.append(top);
     const r = mat?.adjustable[op];
     if (r && mat?.ops.includes(op)) {
       const value = powerChoice[op] ?? r.defaultPct;
@@ -1012,6 +1070,82 @@ function renderLayers(): void {
     return li;
   }));
 }
+
+/** Recolour lines already on screen, before the server answers: `from` null means the grey unchosen lines. */
+function recolourNow(ids: number[], from: OpKind | null | 'all', to: ColorChoice): void {
+  if (!result) return;
+  for (const id of ids) {
+    const i = resultIds.indexOf(id);
+    if (i < 0) continue;
+    const moved: [number, number][][] = [];
+    result.preview = result.preview.filter((l) => {
+      if (l.part !== i || (from !== 'all' && l.kind !== from)) return true;
+      moved.push(...l.paths);
+      return false;
+    });
+    if (from === null || from === 'all') {
+      result.unassigned = (result.unassigned ?? []).filter((u) => {
+        if (u.part !== i) return true;
+        moved.push(...u.paths);
+        return false;
+      });
+    }
+    if (to !== 'ignore' && moved.length) result.preview.push({ kind: to, part: i, paths: moved });
+  }
+}
+
+function toggleHidden(op: OpKind): void {
+  if (hiddenOps.has(op)) hiddenOps.delete(op);
+  else hiddenOps.add(op);
+  ws.setHidden(hiddenOps);
+  renderLayers();
+}
+
+// ---------- right-click menu ----------
+
+function openMenu(at: { x: number; y: number }): void {
+  const menu = $('ctxmenu');
+  const ids = selection();
+  const items: ([string, () => void] | null)[] = [];
+  if (ids.length) {
+    const mat = materials.find((m) => m.id === materialId);
+    for (const op of [...RUN_ORDER].reverse()) {
+      if (!mat || mat.ops.includes(op)) items.push([OP_LABELS[op], () => applyColor(op)]);
+    }
+    items.push(null);
+    if (ids.length > 1) items.push(['Group', groupSelected]);
+    if (canUngroup()) items.push(['Ungroup', ungroup]);
+    if (selected !== null) items.push(['Rotate', () => $('rotate').click()]);
+    items.push(['Delete', deleteSelected], null);
+  }
+  if (parts.length) items.push(['Select all', selectAll]);
+  for (const op of RUN_ORDER) items.push([`${hiddenOps.has(op) ? 'Show' : 'Hide'} ${OP_LABELS[op]}`, () => toggleHidden(op)]);
+  menu.replaceChildren(...items.map((it) => {
+    if (!it) return Object.assign(document.createElement('hr'), {});
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = it[0];
+    b.onclick = () => { closeMenu(); it[1](); };
+    return b;
+  }));
+  menu.hidden = false;
+  // keep it on screen
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(at.x, innerWidth - r.width - 8)}px`;
+  menu.style.top = `${Math.min(at.y, innerHeight - r.height - 8)}px`;
+  (menu.querySelector('button') as HTMLButtonElement | null)?.focus();
+}
+
+function closeMenu(): void {
+  $('ctxmenu').hidden = true;
+}
+document.addEventListener('pointerdown', (e) => {
+  const t = e.target as HTMLElement;
+  if (e.button === 2 && t.id === 'ws') return; // the right click that just opened it
+  if (!t.closest('#ctxmenu')) closeMenu();
+});
+window.addEventListener('blur', closeMenu);
 
 /** The colours the server found in one part (from the last result), with what the file makes each one. */
 function fileColors(id: number): { key: string; kind: OpKind | null }[] {
@@ -1080,9 +1214,16 @@ function renderColors(): void {
     if (groups.size > 1) out.push(Object.assign(document.createElement('div'), { className: 'colorfile small muted', textContent: g.part.source.name }));
     for (const c of g.colors) {
       out.push(row(c.key, colorNow(g.part.source, c.key, c.kind), (choice) => {
+        const was = colorNow(g.part.source, c.key, c.kind);
+        const alone = was !== 'ignore' && !g.colors.some((o) => o.key !== c.key && colorNow(g.part.source, o.key, o.kind) === was);
+        const ids: number[] = [];
         for (const q of parts) { // copies of the same file change together
-          if (q.source.kind === 'file' && copyKey(q.source) === copies) q.source.colors = { ...q.source.colors, [c.key]: choice };
+          if (q.source.kind === 'file' && copyKey(q.source) === copies) {
+            q.source.colors = { ...q.source.colors, [c.key]: choice };
+            ids.push(q.id);
+          }
         }
+        if (alone) recolourNow(ids, was, choice);
         changed();
       }));
     }
@@ -1227,8 +1368,14 @@ $<HTMLFormElement>('patternForm').onsubmit = (ev) => {
   changed();
 };
 
+/** The "Updating" sign over the bed: kids see their change is on its way, not ignored. */
+function setBusy(on: boolean): void {
+  $('busy').hidden = !on;
+}
+
 function schedule(delay = 400): void {
   pending = true;
+  if (materialId && getPhrase() && parts.length) setBusy(true); // at once, not after the pause
   clearTimeout(timer);
   timer = window.setTimeout(run, delay);
 }
@@ -1271,20 +1418,20 @@ async function run(): Promise<void> {
     result = null;
     resultIds = [];
     pending = false;
-    ws.setBusy(false);
+    setBusy(false);
     render();
     return;
   }
   // The site works without the phrase. Only processing (the server's container) needs it.
   if (!getPhrase()) {
     pending = false;
-    ws.setBusy(false);
+    setBusy(false);
     ws.clearLive();
     render();
     return;
   }
   const mine = ++seq;
-  ws.setBusy(true);
+  setBusy(true);
   try {
     const res = await processDesign(req, files);
     if (mine !== seq) return; // a newer request superseded this one
@@ -1301,7 +1448,7 @@ async function run(): Promise<void> {
     }
   }
   pending = false;
-  ws.setBusy(false);
+  setBusy(false);
   ws.clearLive();
   render();
 }
@@ -1344,7 +1491,7 @@ function render(): void {
   $('messages').replaceChildren(...errors.map((e) => li(e, 'err')), ...notes.map((n) => li(n, 'note')), ...warnings.map((w) => li(w, 'warn')));
   $('estimate').textContent = result?.rd && !pending ? `About ${fmtTime(result.estimateS)} on the laser.` : '';
   $('rotate').toggleAttribute('disabled', selected === null);
-  $('ungroup').toggleAttribute('disabled', find(selected)?.source.kind !== 'file');
+  renderSelectButtons();
   $('delete').toggleAttribute('disabled', !selection().length);
   $('selectAll').toggleAttribute('disabled', !parts.length);
   $('zoomDesign').toggleAttribute('disabled', !parts.length);
@@ -1501,6 +1648,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (ws.drawing && e.key === 'Enter') { e.preventDefault(); ws.finishDraft(); setTool('select'); return; }
+  if (e.key === 'Escape' && !$('ctxmenu').hidden) { closeMenu(); return; }
   if (e.key === 'Escape') {
     // like AutoCAD: Esc ends the drawing and keeps what was drawn
     if (ws.drawing) { ws.finishDraft(); setTool('select'); return; }
@@ -1558,7 +1706,7 @@ function defaultHint(): void {
       ? 'Open an SVG or DXF file, or use Text, Box or Circle on the left.'
       : !getPhrase()
         ? 'Arrange your design. When you are ready, enter the class phrase in the Laser panel to check it.'
-        : 'Drag parts or the purple grip to move them. Scroll or pinch to zoom. Then connect the laser and Send. Frame and Start on the laser.';
+        : 'Drag parts to move them. Drag on empty bed to box-select; right-click for more. Scroll to zoom; middle button or Space+drag to pan. Then connect the laser and Send.';
 }
 
 // ---------- saving the design on this Chromebook ----------
