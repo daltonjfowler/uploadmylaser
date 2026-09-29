@@ -25,6 +25,7 @@ FONTS = {
 }
 # Joined-up letters overlap, so cutting them out gives messy, fragile parts.
 CUT_UNFRIENDLY = {"script", "marker"}
+LINE_GAP = 1.6  # line to line, in cap heights
 _cache: dict[str, TTFont] = {}
 
 
@@ -50,20 +51,27 @@ def import_text(spec: TextSpec, warnings: ImportWarnings, tol_mm: float = 0.05, 
     cap = getattr(font["OS/2"], "sCapHeight", 0) or font["head"].unitsPerEm * 0.7
     k = spec.height_mm / cap  # font units → mm
 
+    lines = [ln for ln in spec.value.replace("\r", "").split("\n")]
+    width = lambda ln: sum(hmtx[cmap[ord(ch)]][0] for ch in ln if ord(ch) in cmap)  # noqa: E731
+    widest = max(width(ln) for ln in lines)
     items: list[Item] = []
-    pen_x = 0.0
-    for gi, ch in enumerate(spec.value):
-        gname = cmap.get(ord(ch))
-        if gname is None:
-            warnings.add(f"The font has no '{ch}', so it was skipped.")
-            continue
-        pen = SVGPathPen(glyphs)
-        glyphs[gname].draw(pen)
-        d = pen.getCommands()
-        if d:
-            for pts, closed in _flatten(Path(d), tol_mm / k, budget):
-                mm = [((pen_x + x) * k, (cap - y) * k) for x, y in pts]  # flip y: font is y-up
-                # one group per letter, so overlapping script letters fill as a union instead of cancelling out
-                items.append(Item("text", spec.op, mm, closed, group=gi))
-        pen_x += hmtx[gname][0]
+    gi = 0
+    for li, line in enumerate(lines):
+        pen_x = (widest - width(line)) / 2  # each line centred, like a sign
+        base = li * cap * LINE_GAP
+        for ch in line:
+            gi += 1
+            gname = cmap.get(ord(ch))
+            if gname is None:
+                warnings.add(f"The font has no '{ch}', so it was skipped.")
+                continue
+            pen = SVGPathPen(glyphs)
+            glyphs[gname].draw(pen)
+            d = pen.getCommands()
+            if d:
+                for pts, closed in _flatten(Path(d), tol_mm / k, budget):
+                    mm = [((pen_x + x) * k, (base + cap - y) * k) for x, y in pts]  # flip y: font is y-up
+                    # one group per letter, so overlapping script letters fill as a union instead of cancelling out
+                    items.append(Item("text", spec.op, mm, closed, group=gi))
+            pen_x += hmtx[gname][0]
     return items

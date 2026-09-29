@@ -8,6 +8,7 @@ import math
 from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .geometry.hatch import hatch
 from .geometry.order import nearest_neighbour, order_cuts
+from .geometry.shapes_ops import outline, weld
 from .geometry.transform import bbox, place
 from .models import ContainerJob, FilePart, OpKind, OpSettings, Part, PartColor, PartPaths, PreviewLayer, ProcessResponse
 from .ruida.encoder import EncLayer, clamp_settings, encode_job, frame_layers, machine_converter
@@ -22,7 +23,15 @@ def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings
     if part.kind == "text":
         from .geometry.text_import import import_text
         try:
-            return import_text(part.text, warnings, budget=budget)
+            if not part.weld:
+                return import_text(part.text, warnings, budget=budget)
+            # welded, joined-up letters cut cleanly, so that warning no longer applies
+            own = ImportWarnings()
+            items = import_text(part.text, own, budget=budget)
+            for w in own:
+                if not w.startswith("Joined-up fonts"):
+                    warnings.add(w)
+            return items
         except TooDetailed:
             raise
         except Exception as e:  # noqa: BLE001
@@ -108,6 +117,10 @@ def process(job: ContainerJob) -> ProcessResponse:
             continue
         if got:
             placed_part, next_group = _place_part(got, part, next_group)
+            if part.weld:
+                placed_part = weld(placed_part)
+            if part.outline is not None:
+                placed_part += outline(placed_part, part.outline.dist_mm, part.outline.hole_mm)
             items += [(pi, it) for it in placed_part]
     if res.errors:
         res.warnings = list(warnings)

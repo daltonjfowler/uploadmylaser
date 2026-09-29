@@ -35,6 +35,8 @@
     <span class="sep"></span>
     <button id="selectAll" data-hint="Select every part, to move them together. (Ctrl+A) Shift+click adds or removes one part.">⬚ Select all</button>
     <button id="rotate" data-hint="Turn the selected part a quarter turn.">⟳ Rotate</button>
+    <button id="mirror" data-hint="Mirror the selected parts left-right. Right-click for up-down.">⇋ Mirror</button>
+    <button id="align" data-hint="Line up the selected parts, or space them evenly.">☰ Align</button>
     <button id="group" data-hint="Group: tie the selected parts together, so clicking one selects and moves them all. (Drag a box on the bed, or Shift+click, to select several.)">▣ Group</button>
     <button id="ungroup" data-hint="Ungroup: untie a group, or split the selected file into its separate shapes, to move or delete each one.">⧉ Ungroup</button>
     <button id="delete" data-hint="Remove the selected part. (Delete key)">🗑 Delete</button>
@@ -63,7 +65,7 @@
         <span class="unit">%</span>
       </span>
       <span id="textControls" hidden>
-        <input id="textValue" maxlength="60" placeholder="Your name" data-hint="Type your text.">
+        <textarea id="textValue" rows="1" maxlength="120" placeholder="Your name" data-hint="Type your text. Press Enter for a new line (up to 4 lines)."></textarea>
         <select id="textFont" data-hint="Pick a font. Stencil is best for Cut through."></select>
         <label data-hint="How tall the capital letters are.">Letters <input id="textH" type="number" min="0.1" step="0.1"> <span class="u">mm</span></label>
       </span>
@@ -81,6 +83,7 @@
       <button id="toolLine" class="tool" data-hint="Line: click two points, or drag. Shift keeps it straight or at 45°.">╱<span>Line</span></button>
       <button id="toolCurve" class="tool" data-hint="Curve: click points to draw a smooth curve. Click the first point to close it.">∿<span>Curve</span></button>
       <button id="toolShapes" class="tool" data-hint="Shapes: stars, hearts, sports balls, callouts and more.">★<span>Shapes</span></button>
+      <button id="toolBoxMaker" class="tool" data-hint="Box maker: a box with finger joints that press together, sized for your material.">📦<span>Box maker</span></button>
       <button id="toolPattern" class="tool" data-hint="Pattern: make copies of the selected part in rows and columns.">▦<span>Pattern</span></button>
     </aside>
 
@@ -109,11 +112,28 @@
         <h2>Layers</h2>
         <div class="matlabel block">Material</div>
         <div id="materialList" class="matlist" role="radiogroup" aria-label="Material"></div>
+        <div class="mymat" data-hint="The size of your piece of material. It shows on the bed, and you get a warning if your design is bigger.">
+          <span class="small">My material</span>
+          <input id="myMatW" type="number" min="10" step="1" placeholder="W" aria-label="Material width in mm"> ×
+          <input id="myMatH" type="number" min="10" step="1" placeholder="H" aria-label="Material height in mm"> <span class="small">mm</span>
+          <button id="myMatClear" type="button" class="small">Clear</button>
+        </div>
         <p class="muted small">Runs top to bottom. Cut through is always last.</p>
         <ol id="layers" class="layers"></ol>
         <div id="colors" class="colors" hidden>
           <h3 id="colorsTitle">What should these colours do?</h3>
           <div id="colorList"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="partPanel" hidden>
+        <h2>Selected part</h2>
+        <label class="check" data-hint="Weld: overlapping shapes of the same colour become one outline. Good for cut-out names in joined-up fonts."><input type="checkbox" id="pWeld"> Weld overlapping shapes</label>
+        <label class="check" data-hint="A Cut through line all the way around this part. Makes keychains, tags and stickers."><input type="checkbox" id="pOutline"> Cut an outline around it</label>
+        <div class="indent">
+          <label>Gap <input id="pDist" type="number" min="0.5" max="20" step="any" value="3"> mm</label>
+          <label class="check"><input type="checkbox" id="pHole"> Keyring hole</label>
+          <label><input id="pHoleMm" type="number" min="2" max="12" step="any" value="5"> mm</label>
         </div>
       </section>
 
@@ -198,6 +218,34 @@
         </section>
       </div>
     </div>
+  </div>
+
+  <div id="boxDlg" class="gate" hidden>
+    <form id="boxForm" class="card wide">
+      <h2>Box maker</h2>
+      <p class="muted small">A box with finger joints that press together. Everything is Cut through.</p>
+      <div class="row">
+        <label><input type="radio" name="boxSize" value="outside" checked> Outside size</label>
+        <label><input type="radio" name="boxSize" value="inside"> Inside size (what fits in it)</label>
+      </div>
+      <div class="row">
+        <label>Width <input id="boxW" type="number" min="20" max="600" step="any" value="100"> mm</label>
+        <label>Depth <input id="boxD" type="number" min="20" max="600" step="any" value="80"> mm</label>
+        <label>Height <input id="boxH" type="number" min="15" max="600" step="any" value="60"> mm</label>
+      </div>
+      <div class="row">
+        <label><input id="boxLid" type="checkbox" checked> Lid (a closed box)</label>
+        <label>Fit <select id="boxFit"><option value="0">Loose</option><option value="0.1" selected>Snug</option><option value="0.2">Tight</option></select></label>
+      </div>
+      <div class="row">
+        <label>Material thickness <input id="boxT" type="number" min="1" max="12" step="any"> mm</label>
+        <label>Finger width <input id="boxF" type="number" min="3" max="50" step="any"> mm</label>
+      </div>
+      <svg id="boxPreview" class="boxprev" aria-label="The box panels"></svg>
+      <p id="boxInfo" class="small muted"></p>
+      <p class="small muted">Tip: measure your board with a ruler. If the fingers are too tight or too loose, change Fit and cut a small test box.</p>
+      <div class="row"><button class="go">Make the box</button> <button type="button" id="boxCancel">Cancel</button></div>
+    </form>
   </div>
 
   <div id="patternDlg" class="gate" hidden>

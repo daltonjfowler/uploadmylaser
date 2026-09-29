@@ -81,11 +81,12 @@ test('placement bounds', () => {
   ]) rejects({ ...good(), parts: [{ ...filePart(), ...bad }] }, undefined);
 });
 
-test('text: value 1..60 chars, known font, height 1..200, an op', () => {
+test('text: value 1..120 chars in up to 4 lines, known font, height 1..200, an op', () => {
   const withText = (t) => ({ ...good(), parts: [{ ...textPart(), text: { ...textPart().text, ...t } }] });
-  for (const value of ['', '   ', 7, undefined, 'x'.repeat(61), 'a\u0000b', 'tab\there']) rejects(withText({ value }));
-  assert.ok(validateProcessRequest(withText({ value: 'x'.repeat(60) }), FILES));
-  assert.ok(validateProcessRequest(withText({ value: '😀'.repeat(60) }), FILES), '60 emoji are 60 characters');
+  for (const value of ['', '   ', 7, undefined, 'x'.repeat(121), 'a\u0000b', 'tab\there', 'a\nb\nc\nd\ne']) rejects(withText({ value }));
+  assert.ok(validateProcessRequest(withText({ value: 'x'.repeat(120) }), FILES));
+  assert.ok(validateProcessRequest(withText({ value: 'Ava\nSmith\nRoom 12\n2026' }), FILES), 'four lines');
+  assert.ok(validateProcessRequest(withText({ value: '😀'.repeat(120) }), FILES), '120 emoji are 120 characters');
   for (const font of ['comic', '', undefined, 'Sans']) rejects(withText({ font }), /font/);
   for (const heightMm of [0.5, 201, NaN, '25', undefined]) rejects(withText({ heightMm }), /height/);
   for (const op of ['ignore', 'burn', undefined]) rejects(withText({ op }));
@@ -142,4 +143,17 @@ test('a file part may carry its own colorMap, checked like the request-wide one'
   rejects({ ...good(), parts: [{ ...filePart(), colorMap: 'cut' }] });
   const t = { ...textPart(), colorMap: { x: 'cut' } };
   assert.equal('colorMap' in validateProcessRequest({ ...good(), parts: [t] }, FILES).parts[0], false);
+});
+
+test('mirror, weld and outline are kept when sane and dropped or refused otherwise', () => {
+  const part = (extra) => ({ ...good(), parts: [{ ...filePart(), ...extra }] });
+  const one = (extra) => validateProcessRequest(part(extra), FILES).parts[0];
+  assert.deepEqual([one({ flipX: true }).flipX, one({ flipY: true }).flipY, 'flipX' in one({ flipX: 'yes' })], [true, true, false]);
+  assert.equal(one({ weld: true }).weld, true);
+  assert.equal('weld' in one({ weld: 1 }), false);
+  assert.deepEqual(one({ outline: { distMm: 3, holeMm: 5, powerMaxPct: 100 } }).outline, { distMm: 3, holeMm: 5 });
+  assert.deepEqual(one({ outline: { distMm: 3, holeMm: 0 } }).outline, { distMm: 3 });
+  for (const outline of [{ distMm: 0.1 }, { distMm: 21 }, { distMm: '3' }, { distMm: 3, holeMm: 1 }, { distMm: 3, holeMm: 13 }, 'big']) rejects(part({ outline }), /outline|keyring/);
+  const t = validateProcessRequest({ ...good(), parts: [{ ...textPart(), weld: true, outline: { distMm: 2 } }] }, FILES).parts[0];
+  assert.deepEqual([t.weld, t.outline], [true, { distMm: 2 }]);
 });

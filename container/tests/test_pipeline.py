@@ -1,3 +1,4 @@
+import os
 import base64
 
 import pytest
@@ -280,3 +281,56 @@ def test_copies_can_share_one_file():
     j.request.parts = [FilePart(file_index=0, file_type="svg", x_mm=200 - 60 * i, y_mm=10) for i in range(3)]
     res = process(j)
     assert res.errors == [] and len([b for b in res.part_boxes if b]) == 3
+
+
+# ---------- mirror, weld, outline, several lines of text ----------
+
+def test_flip_x_mirrors_inside_the_same_box():
+    svg = b"""<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10">
+      <path d="M0 0 L20 0 L0 10 Z" fill="none" stroke="black"/></svg>"""
+    data = [base64.b64encode(svg).decode()]
+    run = lambda **kw: process(ContainerJob(request=ProcessRequest(material_id="ply3", parts=[FilePart(file_index=0, file_type="svg", x_mm=100, y_mm=10, **kw)]), material=MAT, machine=M, files_b64=data))
+    plain, flipped = run(), run(flip_x=True)
+    assert flipped.errors == [] and flipped.part_boxes == plain.part_boxes
+    pts = lambda r: sorted({(round(x, 2), round(y, 2)) for p in r.preview for path in p.paths for x, y in path})
+    x0, _, x1, _ = plain.part_boxes[0]
+    assert pts(flipped) == sorted((round(x0 + x1 - x, 2), y) for x, y in pts(plain))  # every point mirrored
+
+
+def test_weld_merges_overlapping_same_colour_shapes():
+    from app.geometry import Item
+    from app.geometry.shapes_ops import weld
+    a = Item("k", "cut", [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)], True, 1)
+    b = Item("k", "cut", [(5, 5), (15, 5), (15, 15), (5, 15), (5, 5)], True, 2)
+    line = Item("k", "score", [(0, 20), (10, 20)], False, None)
+    out = weld([a, b, line])
+    assert len([it for it in out if it.closed]) == 1 and len([it for it in out if not it.closed]) == 1
+
+
+def test_weld_keeps_letter_holes():
+    from app.geometry import Item
+    from app.geometry.shapes_ops import weld
+    outer = Item("t", "cut", [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)], True, 1)
+    hole = Item("t", "cut", [(3, 3), (7, 3), (7, 7), (3, 7), (3, 3)], True, 1)  # an O
+    assert len(weld([outer, hole])) == 2
+
+
+def test_outline_with_keyring_hole_is_outside_the_design():
+    from app.geometry import Item
+    from app.geometry.shapes_ops import outline
+    design = [Item("t", "engrave", [(20, 0), (40, 0), (40, 10), (20, 10), (20, 0)], True, 1)]
+    ring, hole = outline(design, 3.0, 5.0)
+    assert ring.kind == hole.kind == "cut" and ring.key == hole.key == "outline"
+    assert min(x for x, _ in ring.pts) < 20 - 3 - 5  # the ring tab sticks out on the left
+    assert max(x for x, _ in hole.pts) < 20  # the hole is clear of the design
+
+
+@pytest.mark.skipif(not os.path.exists("/usr/share/fonts/truetype/dejavu"), reason="the fonts are in the image")
+def test_text_outline_makes_a_keychain_job_with_cut_last():
+    parts = [TextPart(x_mm=150, y_mm=20, text=TextSpec(value="Ava\nSmith", font="sans", height_mm=10, op="engrave"),
+                      outline={"dist_mm": 3, "hole_mm": 5})]
+    res = process(ContainerJob(request=ProcessRequest(material_id="ply3", parts=parts), material=MAT, machine=M, files_b64=[]))
+    assert res.errors == [], res.errors
+    assert [p.kind for p in res.preview] == ["engrave", "cut"]
+    b = res.part_boxes[0]
+    assert b[3] - b[1] > 10 * 1.6  # two lines tall

@@ -4,7 +4,7 @@
 // send power or speed; the Worker resolves Material + MachineConfig from KV.
 // Pure: test/process-request.test.mjs runs it.
 
-import type { ColorChoice, OpKind, Part, Placement, ProcessRequest, TextFontId } from '../shared/contracts.ts';
+import type { ColorChoice, OpKind, Part, PartExtras, Placement, ProcessRequest, TextFontId } from '../shared/contracts.ts';
 import { MAX_PARTS, TEXT_FONTS } from '../shared/contracts.ts';
 import { HttpError } from './http.ts';
 import { OPS } from './presets.ts';
@@ -12,7 +12,10 @@ import { OPS } from './presets.ts';
 export const MAX_REQUEST_JSON_BYTES = 2 * 1024 * 1024; // big floorplans: ~5000 parts with their colour choices
 export const MAX_COORD_MM = 5000;
 export const MAX_SCALE = 20;
-export const MAX_TEXT_CHARS = 60;
+export const MAX_TEXT_CHARS = 120;
+export const MAX_TEXT_LINES = 4;
+export const MAX_OUTLINE_MM = 20;
+export const MAX_HOLE_MM = 12;
 export const MAX_TEXT_HEIGHT_MM = 200;
 export const MAX_COLORS = 100;
 export const MAX_COLOR_KEY_CHARS = 200;
@@ -64,7 +67,7 @@ export function validateProcessRequest(body: unknown, fileFields: ReadonlySet<nu
 }
 
 function validatePlacement(p: Record<string, unknown>, n: number): Placement {
-  const { xMm, yMm, scale, scaleY, rotateDeg } = p;
+  const { xMm, yMm, scale, scaleY, rotateDeg, flipX, flipY } = p;
   if (!finite(xMm) || !finite(yMm) || Math.abs(xMm) > MAX_COORD_MM || Math.abs(yMm) > MAX_COORD_MM) {
     bad(`Part ${n} is too far off the workspace. Drag it back on.`);
   }
@@ -73,12 +76,28 @@ function validatePlacement(p: Record<string, unknown>, n: number): Placement {
   if (typeof rotateDeg !== 'number' || !ROTATIONS.includes(rotateDeg)) bad(`Part ${n} can only turn in quarter turns.`);
   const out: Placement = { xMm, yMm, scale, rotateDeg: rotateDeg as Placement['rotateDeg'] };
   if (scaleY !== undefined) out.scaleY = scaleY as number;
+  if (flipX === true) out.flipX = true;
+  if (flipY === true) out.flipY = true;
+  return out;
+}
+
+/** Weld and Outline, the same for files and text. Anything else is dropped. */
+function validateExtras(p: Record<string, unknown>, n: number): PartExtras {
+  const out: PartExtras = {};
+  if (p.weld === true) out.weld = true;
+  const o = p.outline;
+  if (o !== undefined && o !== null) {
+    if (!isObj(o) || !finite(o.distMm) || o.distMm < 0.5 || o.distMm > MAX_OUTLINE_MM) bad(`The outline on part ${n} must be 0.5 to ${MAX_OUTLINE_MM} mm away.`);
+    const hole = o.holeMm;
+    if (hole !== undefined && hole !== 0 && (!finite(hole) || hole < 2 || hole > MAX_HOLE_MM)) bad(`A keyring hole must be 2 to ${MAX_HOLE_MM} mm across.`);
+    out.outline = { distMm: o.distMm, ...(finite(hole) && hole > 0 ? { holeMm: hole } : {}) };
+  }
   return out;
 }
 
 function validatePart(p: unknown, n: number, fileFields: ReadonlySet<number>): Part {
   if (!isObj(p)) bad(`Part ${n} is not readable. Try removing it and adding it again.`);
-  const placement = validatePlacement(p, n);
+  const placement = { ...validatePlacement(p, n), ...validateExtras(p, n) };
 
   if (p.kind === 'file') {
     const { fileIndex, fileType } = p;
@@ -96,6 +115,7 @@ function validatePart(p: unknown, n: number, fileFields: ReadonlySet<number>): P
     const { value, font, heightMm, op } = t;
     if (typeof value !== 'string' || value.trim().length === 0) bad(`Part ${n} needs some text.`);
     if ([...value].length > MAX_TEXT_CHARS) bad(`Text can be at most ${MAX_TEXT_CHARS} letters.`);
+    if (value.split('\n').length > MAX_TEXT_LINES) bad(`Text can have at most ${MAX_TEXT_LINES} lines.`);
     if (CONTROL.test(value)) bad('Text can only use normal letters, numbers and symbols.');
     if (typeof font !== 'string' || !FONT_IDS.includes(font)) bad(`Pick a font for part ${n}.`);
     if (!finite(heightMm) || heightMm < 1 || heightMm > MAX_TEXT_HEIGHT_MM) bad(`Text height must be between 1 and ${MAX_TEXT_HEIGHT_MM} mm.`);

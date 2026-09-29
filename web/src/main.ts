@@ -7,7 +7,7 @@ import '@fontsource/permanent-marker/latin-400.css';
 import '@fontsource/pacifico/latin-400.css';
 import '@fontsource/allerta-stencil/latin-400.css';
 import type {
-  ColorChoice, OpKind, Part, Placement, ProcessRequest, ProcessResponse, PublicMaterial, TextFontId, TextSpec,
+  ColorChoice, OpKind, Part, PartExtras, Placement, ProcessRequest, ProcessResponse, PublicMaterial, TextFontId, TextSpec,
 } from '../../shared/contracts';
 import { MAX_PARTS, MAX_UPLOAD_BYTES, TEXT_FONTS } from '../../shared/contracts';
 import { ApiError, checkPhrase, getMachine, getMaterials, getPhrase, processDesign, setPhrase, type PublicMachine } from './api';
@@ -19,6 +19,7 @@ import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
 import { zip } from './zip';
+import { boxPanels, outsideSize } from './boxmaker';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -40,6 +41,9 @@ let color: OpKind = 'cut';
 let colorMap: Record<string, ColorChoice> = {};
 let powerChoice: Partial<Record<OpKind, number>> = {};
 const hiddenOps = new Set<OpKind>(); // only the view: hidden colours still run on the laser
+let material: { w: number; h: number } | null = null; // the student's own board, drawn on the bed
+let clipboard: DesignPart[] = [];
+let pasteCount = 0;
 let result: ProcessResponse | null = null;
 let resultIds: number[] = []; // part id for each index in `result`
 let pending = false;          // a change is waiting for the server, so `result` is out of date
@@ -101,6 +105,11 @@ async function init(): Promise<void> {
   ws.setHeadDot(relative());
   ws.setZeroCorner(zeroRight(), zeroBottom());
   restore();
+  if (material) {
+    $<HTMLInputElement>('myMatW').value = String(material.w);
+    $<HTMLInputElement>('myMatH').value = String(material.h);
+    ws.setMaterial(material);
+  }
   lastSnap = snap();
   renderHistoryButtons();
   if (!materials.some((m) => m.id === materialId)) materialId = materials.length === 1 ? materials[0].id : '';
@@ -245,7 +254,17 @@ function moveParts(ids: number[], dx: number, dy: number): void {
 
 /** Each part's box is mapped from the old selection box onto the new one, so a group keeps its
  *  spacing in proportion. One Undo step for the lot. */
+/** Box maker panels must keep their size, or the fingers stop fitting the material. */
+function refuseBoxResize(ids: number[]): boolean {
+  if (!ids.some((id) => { const s = find(id)?.source; return s?.kind === 'path' && !!s.box; })) return false;
+  ws.clearLive();
+  warn('Box maker panels keep their size, so the fingers fit your material. To change the box, make a new one.');
+  render();
+  return true;
+}
+
 function resizeParts(ids: number[], fx: number, fy: number, from: Box, to: Box): void {
+  if (refuseBoxResize(ids)) return;
   const kx = (to[2] - to[0]) / Math.max(from[2] - from[0], 1e-6);
   const ky = (to[3] - to[1]) / Math.max(from[3] - from[1], 1e-6);
   const moves = ids.map((id) => ({ p: find(id), b: boxOf(id), server: hasServerView(id) }));
@@ -264,6 +283,7 @@ function resizeParts(ids: number[], fx: number, fy: number, from: Box, to: Box):
  *  `both` sets width and height to v (a circle's diameter). A group keeps its top-right corner. */
 function typeSize(axis: 0 | 1, v: number, both = false): void {
   if (!(v > 0)) return;
+  if (refuseBoxResize(selection())) return;
   const p = find(selected);
   if (p) {
     const b = boxOf(p.id);
@@ -683,7 +703,11 @@ function canUngroup(): boolean {
 }
 
 function renderSelectButtons(): void {
-  $('group').toggleAttribute('disabled', selection().length < 2);
+  const n = selection().length;
+  $('group').toggleAttribute('disabled', n < 2);
+  $('align').toggleAttribute('disabled', n < 2);
+  $('mirror').toggleAttribute('disabled', !n);
+  renderPartPanel();
   $('ungroup').toggleAttribute('disabled', !canUngroup());
 }
 
@@ -759,6 +783,7 @@ function renderSizebar(): void {
   setIfIdle('selPctY', round((p.scaleY ?? p.scale) * 100, 1));
   if (t) {
     setIfIdle('textValue', t.value);
+    $<HTMLTextAreaElement>('textValue').rows = Math.min(4, t.value.split('\n').length);
     setIfIdle('textH', toU(t.heightMm * (p.scaleY ?? p.scale)));
     fontSel.value = t.font;
     fontSel.style.fontFamily = TEXT_FONTS.find((f) => f.id === t.font)?.css ?? '';
@@ -934,7 +959,10 @@ $('selPctY').addEventListener('change', () => {
 });
 $('textValue').addEventListener('input', () => {
   const p = find(selected);
-  if (p?.source.kind === 'text') { p.source.text.value = $<HTMLInputElement>('textValue').value.slice(0, 60); changed({ merge: `text${p.id}` }); }
+  if (p?.source.kind === 'text') {
+    p.source.text.value = $<HTMLTextAreaElement>('textValue').value.split('\n').slice(0, 4).join('\n').slice(0, 120);
+    changed({ merge: `text${p.id}` });
+  }
 });
 $('textH').addEventListener('change', () => {
   const p = find(selected);
@@ -1203,7 +1231,6 @@ function toggleHidden(op: OpKind): void {
 // ---------- right-click menu ----------
 
 function openMenu(at: { x: number; y: number }): void {
-  const menu = $('ctxmenu');
   const ids = selection();
   const items: ([string, () => void] | null)[] = [];
   if (ids.length) {
@@ -1215,10 +1242,22 @@ function openMenu(at: { x: number; y: number }): void {
     if (ids.length > 1) items.push(['Group', groupSelected]);
     if (canUngroup()) items.push(['Ungroup', ungroup]);
     if (selected !== null) items.push(['Rotate', () => $('rotate').click()]);
-    items.push(['Delete', deleteSelected], null);
+    items.push(['Mirror left-right', () => mirrorSelected('x')], ['Mirror up-down', () => mirrorSelected('y')]);
+    if (ids.length > 1) items.push(['Line up…', () => openAlignMenu(at)]);
+    items.push(null, ['Copy (Ctrl+C)', copySelected], ['Duplicate (Ctrl+D)', duplicateSelected]);
   }
+  if (clipboard.length) items.push(['Paste (Ctrl+V)', paste]);
+  if (ids.length) items.push(['Delete', deleteSelected]);
+  items.push(null);
   if (parts.length) items.push(['Select all', selectAll]);
   for (const op of RUN_ORDER) items.push([`${hiddenOps.has(op) ? 'Show' : 'Hide'} ${OP_LABELS[op]}`, () => toggleHidden(op)]);
+  showMenu(at, items);
+}
+
+function showMenu(at: { x: number; y: number }, items: ([string, () => void] | null)[]): void {
+  const menu = $('ctxmenu');
+  while (items[0] === null) items.shift();
+  while (items.at(-1) === null) items.pop();
   menu.replaceChildren(...items.map((it) => {
     if (!it) return Object.assign(document.createElement('hr'), {});
     const b = document.createElement('button');
@@ -1417,6 +1456,256 @@ function renderHistoryButtons(): void {
 $('undo').onclick = undo;
 $('redo').onclick = redo;
 
+// ---------- copy, paste, duplicate ----------
+
+/** Copies of `ps` with new ids, moved by (dx, dy); groups among them stay groups (with new group ids). */
+function copiesOf(ps: DesignPart[], dx: number, dy: number): DesignPart[] {
+  const groups = new Map<number, number>();
+  return cloneParts(ps).map((q) => ({
+    ...q,
+    id: nextId++,
+    xMm: round(q.xMm + dx),
+    yMm: round(q.yMm + dy),
+    ...(q.groupId !== undefined ? { groupId: groups.get(q.groupId) ?? (groups.set(q.groupId, nextId++), groups.get(q.groupId)!) } : {}),
+  }));
+}
+
+function putCopies(made: DesignPart[]): void {
+  if (!made.length) return;
+  if (parts.length + made.length > MAX_PARTS) return warn(`That would be more than ${MAX_PARTS} parts.`);
+  parts.push(...made);
+  changed();
+  if (made.length === 1) select(made[0].id);
+  else setGroup(made.map((q) => q.id));
+}
+
+function copySelected(): void {
+  const ids = selection();
+  if (!ids.length) return;
+  clipboard = cloneParts(parts.filter((p) => ids.includes(p.id)));
+  pasteCount = 0;
+  warn(`Copied ${ids.length} ${ids.length === 1 ? 'part' : 'parts'}. Ctrl+V pastes.`, '✓');
+}
+
+function paste(): void {
+  if (!clipboard.length) return warn('Nothing copied yet. Select a part and press Ctrl+C.');
+  pasteCount++;
+  putCopies(copiesOf(clipboard, -10 * pasteCount, 10 * pasteCount));
+}
+
+function duplicateSelected(): void {
+  const ids = selection();
+  if (!ids.length) return;
+  putCopies(copiesOf(parts.filter((p) => ids.includes(p.id)), -10, 10));
+}
+
+// ---------- mirror ----------
+
+/** Mirror the selection left-right (x) or up-down (y). Several parts also swap places across the middle. */
+function mirrorSelected(axis: 'x' | 'y'): void {
+  const ids = selection();
+  const boxes = ids.map((id) => [id, boxOf(id)] as const).filter((e): e is readonly [number, Box] => !!e[1]);
+  if (!boxes.length) return;
+  const all = unionBox(boxes.map((e) => e[1]))!;
+  for (const [id, b] of boxes) {
+    const p = find(id)!;
+    // the flip is in the part's own frame; a quarter turn swaps which way that is on the bed
+    const own = p.rotateDeg === 90 || p.rotateDeg === 270 ? (axis === 'x' ? 'y' : 'x') : axis;
+    if (own === 'x') p.flipX = !p.flipX || undefined;
+    else p.flipY = !p.flipY || undefined;
+    if (!p.flipX) delete p.flipX;
+    if (!p.flipY) delete p.flipY;
+    const dx = axis === 'x' ? all[0] + all[2] - b[2] - b[0] : 0;
+    const dy = axis === 'y' ? all[1] + all[3] - b[3] - b[1] : 0;
+    p.xMm = round(p.xMm + dx);
+    p.yMm = round(p.yMm + dy);
+    flipResult(id, axis, dx, dy);
+  }
+  changed();
+}
+
+/** Mirror what is already on screen too, so the flip shows before the server answers. */
+function flipResult(id: number, axis: 'x' | 'y', dx: number, dy: number): void {
+  const i = resultIds.indexOf(id);
+  const b = result?.partBoxes[i];
+  if (!result || i < 0 || !b) return;
+  const f = ([x, y]: [number, number]): [number, number] => axis === 'x' ? [b[0] + b[2] - x + dx, y + dy] : [x + dx, b[1] + b[3] - y + dy];
+  for (const l of [...result.preview, ...(result.unassigned ?? [])]) if (l.part === i) l.paths = l.paths.map((path) => path.map(f));
+  result.partBoxes[i] = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
+}
+
+// ---------- align and space evenly ----------
+
+type AlignHow = 'left' | 'centre' | 'right' | 'top' | 'middle' | 'bottom' | 'across' | 'down';
+const ALIGN_LABELS: Record<AlignHow, string> = {
+  left: 'Align left', centre: 'Align centres (across)', right: 'Align right', top: 'Align top', middle: 'Align middles (down)',
+  bottom: 'Align bottom', across: 'Space evenly across', down: 'Space evenly down',
+};
+
+function alignSelected(how: AlignHow): void {
+  const ids = selection();
+  const boxes = ids.map((id) => [id, boxOf(id)] as const).filter((e): e is readonly [number, Box] => !!e[1]);
+  if (boxes.length < 2) return warn('Select two or more parts to line them up (drag a box around them).');
+  const [X0, Y0, X1, Y1] = unionBox(boxes.map((e) => e[1]))!;
+  const moves = new Map<number, [number, number]>();
+  if (how === 'across' || how === 'down') {
+    const k = how === 'across' ? 0 : 1;
+    const sorted = [...boxes].sort((a, b) => a[1][k] + a[1][k + 2] - b[1][k] - b[1][k + 2]);
+    const total = sorted.reduce((n, [, b]) => n + b[k + 2] - b[k], 0);
+    const gap = ((k ? Y1 - Y0 : X1 - X0) - total) / (sorted.length - 1);
+    let at = k ? Y0 : X0;
+    for (const [id, b] of sorted) {
+      const d = at - b[k];
+      moves.set(id, k ? [0, d] : [d, 0]);
+      at += b[k + 2] - b[k] + gap;
+    }
+  } else {
+    for (const [id, b] of boxes) {
+      const d = {
+        left: [X0 - b[0], 0], right: [X1 - b[2], 0], centre: [(X0 + X1 - b[0] - b[2]) / 2, 0],
+        top: [0, Y0 - b[1]], bottom: [0, Y1 - b[3]], middle: [0, (Y0 + Y1 - b[1] - b[3]) / 2],
+      }[how] as [number, number];
+      moves.set(id, d);
+    }
+  }
+  for (const [id, [dx, dy]] of moves) {
+    const p = find(id)!;
+    p.xMm = round(p.xMm + dx);
+    p.yMm = round(p.yMm + dy);
+    shiftResult(id, dx, dy);
+  }
+  changed();
+}
+
+function openAlignMenu(at: { x: number; y: number }): void {
+  showMenu(at, (Object.keys(ALIGN_LABELS) as AlignHow[]).map((how) => [ALIGN_LABELS[how], () => alignSelected(how)]));
+}
+$('align').onclick = () => { const r = $('align').getBoundingClientRect(); openAlignMenu({ x: r.left, y: r.bottom + 4 }); };
+$('mirror').onclick = () => mirrorSelected('x');
+
+// ---------- the selected part: weld and outline ----------
+
+function renderPartPanel(): void {
+  const p = find(selected);
+  const box = $('partPanel');
+  box.hidden = !p;
+  if (!p) return;
+  const set = (id: string, v: boolean) => { $<HTMLInputElement>(id).checked = v; };
+  set('pWeld', !!p.weld);
+  set('pOutline', !!p.outline);
+  set('pHole', !!p.outline?.holeMm);
+  const idle = (id: string, v: number) => { const el = $<HTMLInputElement>(id); if (document.activeElement !== el) el.value = String(v); };
+  idle('pDist', p.outline?.distMm ?? 3);
+  idle('pHoleMm', p.outline?.holeMm ?? 5);
+  $<HTMLInputElement>('pDist').disabled = !p.outline;
+  $<HTMLInputElement>('pHole').disabled = !p.outline;
+  $<HTMLInputElement>('pHoleMm').disabled = !p.outline?.holeMm;
+}
+
+function readPartPanel(): void {
+  const p = find(selected);
+  if (!p) return;
+  const num = (id: string, lo: number, hi: number, dflt: number) => clamp(Number($<HTMLInputElement>(id).value) || dflt, lo, hi);
+  if ($<HTMLInputElement>('pWeld').checked) p.weld = true;
+  else delete p.weld;
+  if ($<HTMLInputElement>('pOutline').checked) {
+    const hole = $<HTMLInputElement>('pHole').checked ? num('pHoleMm', 2, 12, 5) : 0;
+    p.outline = { distMm: num('pDist', 0.5, 20, 3), ...(hole ? { holeMm: hole } : {}) };
+  } else delete p.outline;
+  changed();
+}
+for (const id of ['pWeld', 'pOutline', 'pHole', 'pDist', 'pHoleMm']) $(id).addEventListener('change', readPartPanel);
+
+// ---------- my material ----------
+
+function readMaterial(): void {
+  const w = Number($<HTMLInputElement>('myMatW').value);
+  const h = Number($<HTMLInputElement>('myMatH').value);
+  material = w > 0 && h > 0 ? { w: clamp(w, 10, machine.bedWidthMm), h: clamp(h, 10, machine.bedHeightMm) } : null;
+  ws.setMaterial(material);
+  save();
+  render();
+}
+for (const id of ['myMatW', 'myMatH']) $(id).addEventListener('change', readMaterial);
+$('myMatClear').onclick = () => { $<HTMLInputElement>('myMatW').value = ''; $<HTMLInputElement>('myMatH').value = ''; readMaterial(); };
+
+// ---------- box maker ----------
+
+function boxSpecFromForm() {
+  const n = (id: string) => Number($<HTMLInputElement>(id).value);
+  const t = clamp(n('boxT') || 3, 1, 12);
+  const lid = $<HTMLInputElement>('boxLid').checked;
+  const inside = ($('boxForm').querySelector('input[name=boxSize]:checked') as HTMLInputElement | null)?.value === 'inside';
+  const size = outsideSize(clamp(n('boxW') || 100, 20, 600), clamp(n('boxD') || 80, 20, 600), clamp(n('boxH') || 60, 15, 600), t, inside, lid);
+  const finger = clamp(n('boxF') || Math.max(3 * t, 8), 3, 50);
+  return { ...size, t, lid, kerf: Number($<HTMLSelectElement>('boxFit').value) || 0, finger };
+}
+
+/** Panels laid out in rows from `start` (top-right corner), leftwards, wrapping onto the bed. */
+function boxLayout(panels: { w: number; h: number }[], start: { xMm: number; yMm: number }): { xMm: number; yMm: number }[] {
+  const gap = 4;
+  let x = start.xMm;
+  let y = start.yMm;
+  let rowH = 0;
+  return panels.map((p) => {
+    if (x - p.w < 0 && rowH > 0) { x = machine.bedWidthMm - 10; y += rowH + gap; rowH = 0; }
+    const at = { xMm: round(x), yMm: round(y) };
+    x -= p.w + gap;
+    rowH = Math.max(rowH, p.h);
+    return at;
+  });
+}
+
+function updateBoxPreview(): void {
+  const spec = boxSpecFromForm();
+  const panels = boxPanels(spec);
+  // preview only: all panels in one row
+  let x = 0;
+  const laid = panels.map((p) => { const at = x; x += p.w + 4; return { x: at, p }; });
+  const W = x - 4;
+  const H = Math.max(...panels.map((p) => p.h));
+  const svg = $('boxPreview');
+  svg.setAttribute('viewBox', `-2 -2 ${W + 4} ${H + 4}`);
+  svg.innerHTML = laid.map(({ x: px, p }) => `<path d="${p.d}" transform="translate(${px} 0)" fill="rgba(180,120,60,.15)" stroke="currentColor" stroke-width="${Math.max(W, H) / 400}"/>`).join('');
+  const thick = materials.find((mm) => mm.id === materialId)?.thicknessMm;
+  $('boxInfo').textContent = `${panels.length} panels, outside ${round(spec.w, 1)} × ${round(spec.d, 1)} × ${round(spec.h, 1)} mm, ${round(spec.t, 1)} mm material`
+    + (thick && Math.abs(thick - spec.t) > 0.05 ? ` (your material is ${thick} mm: measure it, boards vary)` : '')
+    + '. Everything is Cut through.';
+}
+
+$('toolBoxMaker').onclick = () => {
+  const thick = materials.find((mm) => mm.id === materialId)?.thicknessMm;
+  if (!$<HTMLInputElement>('boxT').value) $<HTMLInputElement>('boxT').value = String(thick ?? 3);
+  if (!$<HTMLInputElement>('boxF').value) $<HTMLInputElement>('boxF').value = String(round(Math.max(3 * (thick ?? 3), 8), 1));
+  updateBoxPreview();
+  $('boxDlg').hidden = false;
+  $<HTMLInputElement>('boxW').focus();
+};
+$('boxCancel').onclick = () => { $('boxDlg').hidden = true; };
+$('boxForm').addEventListener('input', updateBoxPreview);
+$<HTMLFormElement>('boxForm').onsubmit = (ev) => {
+  ev.preventDefault();
+  const spec = boxSpecFromForm();
+  const panels = boxPanels(spec);
+  if (panels.some((p) => p.w > machine.bedWidthMm - 20 || p.h > machine.bedHeightMm - 20)) return warn('That box is too big for the laser bed. Make it smaller.');
+  if (parts.length + panels.length > MAX_PARTS) return warn(`That would be more than ${MAX_PARTS} parts.`);
+  const spots = boxLayout(panels, newSpot());
+  const gid = nextId++;
+  const made: DesignPart[] = panels.map((p, i) => ({
+    id: nextId++,
+    source: { kind: 'path', name: `Box ${p.name}`, d: p.d, vb: { x: 0, y: 0, w: p.w, h: p.h }, closed: true, wMm: p.w, hMm: p.h, op: 'cut', box: true },
+    ...spots[i],
+    scale: 1,
+    rotateDeg: 0,
+    groupId: gid,
+  }));
+  parts.push(...made);
+  $('boxDlg').hidden = true;
+  changed();
+  setGroup(made.map((q) => q.id));
+  warn(`Box made: ${made.length} panels, grouped. Ungroup to move one on its own.`, '✓');
+};
+
 // ---------- pattern tool ----------
 
 $('toolPattern').onclick = () => {
@@ -1485,8 +1774,12 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
   const reqParts: Part[] = [];
   const fileOf = new Map<string, number>();
   for (const p of parts) {
-    const pl: Placement = { xMm: p.xMm, yMm: p.yMm, scale: p.scale, rotateDeg: p.rotateDeg };
+    const pl: Placement & PartExtras = { xMm: p.xMm, yMm: p.yMm, scale: p.scale, rotateDeg: p.rotateDeg };
     if (p.scaleY !== undefined) pl.scaleY = p.scaleY;
+    if (p.flipX) pl.flipX = true;
+    if (p.flipY) pl.flipY = true;
+    if (p.weld) pl.weld = true;
+    if (p.outline) pl.outline = { ...p.outline };
     const s = p.source;
     if (s.kind === 'text') {
       if (!s.text.value.trim()) continue;
@@ -1586,6 +1879,10 @@ function render(): void {
   renderColors();
   const errors = [...(result?.errors ?? [])];
   const warnings = [...(result?.warnings ?? [])];
+  const job = unionBox(views.map((v) => v.box));
+  if (material && job && (job[2] - job[0] > material.w + 0.5 || job[3] - job[1] > material.h + 0.5)) {
+    warnings.push(`Your design (${round(job[2] - job[0], 0)} × ${round(job[3] - job[1], 0)} mm) is bigger than your material (${material.w} × ${material.h} mm).`);
+  }
   const li = (t: string, cls: string) => Object.assign(document.createElement('li'), { textContent: t, className: cls });
   $('messages').replaceChildren(...errors.map((e) => li(e, 'err')), ...notes.map((n) => li(n, 'note')), ...warnings.map((w) => li(w, 'warn')));
   $('estimate').textContent = result?.rd && !pending ? `About ${fmtTime(result.estimateS)} on the laser.` : '';
@@ -1781,6 +2078,13 @@ document.addEventListener('keydown', (e) => {
     selectAll();
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); paste(); return; }
+  if ((e.ctrlKey || e.metaKey) && (k === 'c' || k === 'd') && selection().length) {
+    e.preventDefault();
+    if (k === 'c') copySelected();
+    else duplicateSelected();
+    return;
+  }
   if (ws.drawing && ws.hasDraft && /^[0-9.]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     openLength(e.key);
@@ -1796,7 +2100,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     // like AutoCAD: Esc ends the drawing and keeps what was drawn
     if (ws.drawing) { ws.finishDraft(); setTool('select'); return; }
-    for (const id of ['helpDlg', 'libraryDlg', 'patternDlg']) $(id).hidden = true;
+    for (const id of ['helpDlg', 'libraryDlg', 'patternDlg', 'boxDlg']) $(id).hidden = true;
     select(null);
     return;
   }
@@ -1857,7 +2161,7 @@ function defaultHint(): void {
 
 function save(): void {
   try {
-    localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, materialId, color, locked, unit }));
+    localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, materialId, color, locked, unit, material }));
   } catch {
     /* too big for storage: the design still works, it just won't survive a reload */
   }
@@ -1870,6 +2174,8 @@ function restore(): void {
     parts = s.parts;
     colorMap = s.colorMap ?? {};
     materialId = s.materialId ?? '';
+    const mt = s.material;
+    if (mt && Number(mt.w) > 0 && Number(mt.h) > 0) material = { w: Number(mt.w), h: Number(mt.h) };
     if (s.color in OP_LABELS) color = s.color;
     if (s.locked === false) locked = false;
     if (s.unit === 'cm' || s.unit === 'in') unit = s.unit;

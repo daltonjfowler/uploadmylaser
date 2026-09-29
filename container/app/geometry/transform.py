@@ -19,6 +19,10 @@ def place(items: list[Item], p: Placement) -> list[Item]:
 
     def tf(pt: Pt) -> Pt:
         x, y = (pt[0] - x0) * sx, (pt[1] - y0) * sy
+        if p.flip_x:
+            x = w - x
+        if p.flip_y:
+            y = h - y
         if p.rotate_deg == 90:      # clockwise, keeping the result's top-left at (0, 0)
             x, y = h - y, x
         elif p.rotate_deg == 180:

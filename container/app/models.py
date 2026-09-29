@@ -59,16 +59,25 @@ class Placement(_Camel):
     scale: float = Field(default=1.0, gt=0, le=20)
     scale_y: Optional[float] = Field(default=None, gt=0, le=20)  # stretched height; None = scale
     rotate_deg: Literal[0, 90, 180, 270] = 0
+    flip_x: bool = False  # mirrored in the part's own frame, before rotation
+    flip_y: bool = False
+
+
+class OutlineSpec(_Camel):
+    dist_mm: float = Field(ge=0.5, le=20)
+    hole_mm: float = Field(default=0.0, ge=0, le=12)
 
 
 class TextSpec(_Camel):
-    value: str = Field(min_length=1, max_length=60)
+    value: str = Field(min_length=1, max_length=120)  # up to 4 lines
     font: str = "sans"
     height_mm: float = Field(default=15.0, gt=1, le=200)
     op: OpKind = "engrave"
 
 
 class FilePart(Placement):
+    weld: bool = False
+    outline: Optional[OutlineSpec] = None
     kind: Literal["file"] = "file"
     file_index: int = Field(ge=0)
     file_type: Literal["svg", "dxf"]
@@ -76,6 +85,8 @@ class FilePart(Placement):
 
 
 class TextPart(Placement):
+    weld: bool = False
+    outline: Optional[OutlineSpec] = None
     kind: Literal["text"] = "text"
     text: TextSpec
 

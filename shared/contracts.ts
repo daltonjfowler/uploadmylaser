@@ -61,13 +61,21 @@ export interface Placement {
   /** Height scale when stretched (lock off). Missing = same as `scale`. Applied before rotation. */
   scaleY?: number;
   rotateDeg: 0 | 90 | 180 | 270;
+  /** Mirrored left-right / up-down in the part's own frame, before rotation. */
+  flipX?: boolean;
+  flipY?: boolean;
 }
+
+/** Cut line `distMm` around everything in a part, optionally with a keyring hole (`holeMm` across). */
+export interface OutlineSpec { distMm: number; holeMm?: number }
+/** Extras any part may have: weld its overlapping shapes, and/or add an outline. */
+export interface PartExtras { weld?: boolean; outline?: OutlineSpec }
 
 export interface TextSpec { value: string; font: TextFontId; heightMm: number; op: OpKind }
 
 /** One thing on the workspace: an uploaded file (multipart field `file<fileIndex>`) or typed text.
  *  Boxes and circles are drawn by the browser as small SVG files. */
-export type Part = Placement & (
+export type Part = Placement & PartExtras & (
   // colorMap: this file's own colour choices, ahead of the request-wide one (so Box/Circle are never touched)
   | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf'; colorMap?: Record<string, ColorChoice> }
   | { kind: 'text'; text: TextSpec }
@@ -116,7 +124,7 @@ export const TEXT_FONTS = [
   { id: 'block', label: 'Block', css: 'Anton', tip: 'Tall and bold. Great for names.' },
   { id: 'chunky', label: 'Chunky', css: 'Bungee', tip: 'Wide letters, easy to engrave.' },
   { id: 'marker', label: 'Marker', css: 'Permanent Marker', tip: 'Engrave it, don\'t cut it out.' },
-  { id: 'script', label: 'Script', css: 'Pacifico', tip: 'Joined-up letters: engrave only.' },
+  { id: 'script', label: 'Script', css: 'Pacifico', tip: 'Joined-up letters: engrave, or tick Weld to cut them out.' },
   { id: 'stencil', label: 'Stencil', css: 'Allerta Stencil', tip: 'Best for Cut through: letters keep their middles.' },
 ] as const;
 export type TextFontId = (typeof TEXT_FONTS)[number]['id'];

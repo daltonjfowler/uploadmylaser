@@ -3,6 +3,7 @@
 // re-processes when you let go.
 import type { OpKind } from '../../shared/contracts';
 import { OP_COLORS, UNSURE } from './ops';
+import { LINE_GAP } from './sketch';
 import { smoothD } from './library';
 import { isDark, onThemeChange } from './theme';
 
@@ -17,7 +18,7 @@ const SEL = '#7c3aed';
 export type Box = [number, number, number, number]; // x0, y0, x1, y1 in bed mm
 
 /** A browser-drawn stand-in for geometry the server hasn't sent yet (see sketch.ts). */
-export type Sketch = { rot: number } & (
+export type Sketch = { rot: number; flipX?: boolean; flipY?: boolean } & (
   | { kind: 'text'; value: string; font: string; color: string; fill: boolean }
   | { kind: 'image'; img: HTMLImageElement }
   | { kind: 'label'; text: string }
@@ -92,6 +93,7 @@ export class Workspace {
     | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
     | null = null;
   private hidden = new Set<OpKind>(); // colours not drawn (they still run on the laser)
+  private material: { w: number; h: number } | null = null;
   /** Fingers (or pens/mice) currently down, for pinch zoom. */
   private pointers = new Map<number, { x: number; y: number }>();
   private touchSlop = 0; // extra px of handle hit area for fingers
@@ -244,6 +246,12 @@ export class Workspace {
 
   setGroup(ids: number[]): void {
     this.group = ids;
+    this.draw();
+  }
+
+  /** The student's own board, drawn from the bed's home corner (null = none). */
+  setMaterial(size: { w: number; h: number } | null): void {
+    this.material = size;
     this.draw();
   }
 
@@ -609,6 +617,27 @@ export class Workspace {
     g.strokeStyle = th.edge;
     g.strokeRect(ox + 0.5, oy + 0.5, bw, bh);
 
+    // the student's own board, from the home corner (where a new design goes)
+    if (this.material) {
+      const mw = this.material.w * s;
+      const mh = this.material.h * s;
+      const mx = this.zero.right ? ox + bw - mw : ox;
+      const my = this.zero.bottom ? oy + bh - mh : oy;
+      g.save();
+      g.fillStyle = 'rgba(180,120,60,0.10)';
+      g.fillRect(mx, my, mw, mh);
+      g.setLineDash([8, 5]);
+      g.strokeStyle = '#b45309';
+      g.lineWidth = 1.5;
+      g.strokeRect(mx + 0.5, my + 0.5, mw, mh);
+      g.setLineDash([]);
+      g.fillStyle = '#b45309';
+      g.font = '600 11px system-ui, sans-serif';
+      g.textAlign = this.zero.right ? 'right' : 'left';
+      g.fillText('My material', this.zero.right ? mx + mw - 6 : mx + 6, my + mh - 6);
+      g.restore();
+    }
+
     // parts
     for (const p of this.parts) this.drawPart(p);
 
@@ -886,6 +915,7 @@ export class Workspace {
     g.save();
     g.translate(ox + ((b[0] + b[2]) / 2) * s, oy + ((b[1] + b[3]) / 2) * s);
     g.rotate((sk.rot * Math.PI) / 180);
+    if (sk.flipX || sk.flipY) g.scale(sk.flipX ? -1 : 1, sk.flipY ? -1 : 1);
     if (sk.kind === 'path') {
       // map the path's own bounds onto the box; stroke width stays constant on screen
       const m = new DOMMatrix().translate(-w / 2, -h / 2).scale(sk.vb.w > 1e-6 ? w / sk.vb.w : 1, sk.vb.h > 1e-6 ? h / sk.vb.h : 1).translate(-sk.vb.x, -sk.vb.y);
@@ -903,20 +933,25 @@ export class Workspace {
       g.drawImage(sk.img, -w / 2, -h / 2, w, h);
     } else if (sk.kind === 'text') {
       g.font = sk.font;
-      const m = g.measureText(sk.value);
-      const tw = m.width || 1;
-      const th = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent || 1;
+      const lines = sk.value.split('\n');
+      const cap = g.measureText('H').actualBoundingBoxAscent || 1;
+      const ms = lines.map((ln) => g.measureText(ln || ' '));
+      const first = ms[0];
+      const last = ms[ms.length - 1];
+      const tw = Math.max(...ms.map((m) => m.width)) || 1;
+      const gap = LINE_GAP * cap;
+      const th = (lines.length - 1) * gap + first.actualBoundingBoxAscent + last.actualBoundingBoxDescent || 1;
       g.scale(w / tw, h / th);
       g.textBaseline = 'alphabetic';
-      const x = -tw / 2;
-      const y = -th / 2 + m.actualBoundingBoxAscent;
-      if (sk.fill) {
-        g.fillStyle = 'rgba(37,99,235,0.5)';
-        g.fillText(sk.value, x, y);
-      }
+      g.textAlign = 'center';
+      if (sk.fill) g.fillStyle = 'rgba(37,99,235,0.5)';
       g.strokeStyle = sk.color;
       g.lineWidth = 1.5 * (tw / w);
-      g.strokeText(sk.value, x, y);
+      lines.forEach((ln, i) => {
+        const y = -th / 2 + first.actualBoundingBoxAscent + i * gap;
+        if (sk.fill) g.fillText(ln, 0, y);
+        g.strokeText(ln, 0, y);
+      });
     } else {
       g.setLineDash([6, 4]);
       g.strokeStyle = '#6b7280';

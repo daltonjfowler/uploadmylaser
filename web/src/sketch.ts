@@ -1,7 +1,7 @@
 // In-browser previews, so the tools work before the class phrase is entered (or while the server
 // works). Boxes and circles are exact. Text and SVG files are close. DXF shows a grey outline of its lines
 // (dxf.ts). The server's preview replaces these as soon as it arrives.
-import type { ColorChoice, OpKind, Placement, TextSpec } from '../../shared/contracts';
+import type { ColorChoice, OpKind, PartExtras, Placement, TextSpec } from '../../shared/contracts';
 import { TEXT_FONTS } from '../../shared/contracts';
 import { OP_COLORS, UNSURE } from './ops';
 import { sketchDxf, type DxfSketch } from './dxf';
@@ -14,9 +14,10 @@ export type Source =
   | { kind: 'text'; text: TextSpec }
   | { kind: 'shape'; shape: ShapeKind; wMm: number; hMm: number; op: OpKind }
   /** Library shapes and the Line/Curve tools: an SVG path stretched from its bounds `vb` to wMm x hMm. */
-  | { kind: 'path'; name: string; d: string; vb: ViewBox; closed: boolean; wMm: number; hMm: number; op: OpKind };
+  /** box: a Box maker panel; resizing it would break its finger joints */
+  | { kind: 'path'; name: string; d: string; vb: ViewBox; closed: boolean; wMm: number; hMm: number; op: OpKind; box?: true };
 /** groupId: parts grouped with the Group button select and move together */
-export interface DesignPart extends Placement { id: number; source: Source; groupId?: number }
+export interface DesignPart extends Placement, PartExtras { id: number; source: Source; groupId?: number }
 
 const PX_MM = 25.4 / 96;
 const UNITS: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: PX_MM, '': PX_MM };
@@ -88,6 +89,7 @@ function dxfSize(data: string): [number, number] | null {
 }
 
 let measurer: CanvasRenderingContext2D | null = null;
+export const LINE_GAP = 1.6; // same as container/app/geometry/text_import.py
 
 export function fontCss(font: string): string {
   const f = TEXT_FONTS.find((x) => x.id === font) ?? TEXT_FONTS[0];
@@ -100,9 +102,13 @@ function textSize(t: TextSpec): [number, number] {
   const g = measurer!;
   g.font = fontCss(t.font);
   const cap = g.measureText('H').actualBoundingBoxAscent || 70;
-  const m = g.measureText(t.value || ' ');
+  const lines = (t.value || ' ').split('\n');
+  const widest = Math.max(...lines.map((ln) => g.measureText(ln || ' ').width));
+  const last = g.measureText(lines[lines.length - 1] || ' ');
   const k = t.heightMm / cap;
-  return [Math.max(m.width * k, 1), Math.max((m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) * k, t.heightMm)];
+  // lines are LINE_GAP cap heights apart, like the server's
+  const h = (lines.length - 1) * LINE_GAP * cap + last.actualBoundingBoxAscent + last.actualBoundingBoxDescent;
+  return [Math.max(widest * k, 1), Math.max(h * k, t.heightMm)];
 }
 
 /** What to draw for a part the server hasn't processed. */
@@ -133,16 +139,16 @@ export function localView(p: DesignPart, onLoad: () => void): PartView {
       });
     view.layers = [{ kind: s.op, paths: [path] }];
   } else if (s.kind === 'path') {
-    view.sketch = { kind: 'path', d: s.d, vb: s.vb, color: OP_COLORS[s.op], fill: s.op === 'engrave' && s.closed, rot: p.rotateDeg };
+    view.sketch = { kind: 'path', d: s.d, vb: s.vb, color: OP_COLORS[s.op], fill: s.op === 'engrave' && s.closed, rot: p.rotateDeg, flipX: !!p.flipX, flipY: !!p.flipY };
   } else if (s.kind === 'text') {
-    view.sketch = { kind: 'text', value: s.text.value || ' ', font: fontCss(s.text.font), color: OP_COLORS[s.text.op], fill: s.text.op === 'engrave', rot: p.rotateDeg };
+    view.sketch = { kind: 'text', value: s.text.value || ' ', font: fontCss(s.text.font), color: OP_COLORS[s.text.op], fill: s.text.op === 'engrave', rot: p.rotateDeg, flipX: !!p.flipX, flipY: !!p.flipY };
   } else {
     const info = files.get(p.id);
     view.sketch = info?.dxf
-      ? { kind: 'path', d: info.dxf.d, vb: info.dxf.vb, color: UNSURE, fill: false, rot: p.rotateDeg }
+      ? { kind: 'path', d: info.dxf.d, vb: info.dxf.vb, color: UNSURE, fill: false, rot: p.rotateDeg, flipX: !!p.flipX, flipY: !!p.flipY }
       : info?.img && info.known
-        ? { kind: 'image', img: info.img, rot: p.rotateDeg }
-        : { kind: 'label', text: info?.known ? s.name : `${s.name} (size shown after checking)`, rot: p.rotateDeg };
+        ? { kind: 'image', img: info.img, rot: p.rotateDeg, flipX: !!p.flipX, flipY: !!p.flipY }
+        : { kind: 'label', text: info?.known ? s.name : `${s.name} (size shown after checking)`, rot: p.rotateDeg, flipX: !!p.flipX, flipY: !!p.flipY };
   }
   return view;
 }
