@@ -68,7 +68,8 @@ export interface TextSpec { value: string; font: TextFontId; heightMm: number; o
 /** One thing on the workspace: an uploaded file (multipart field `file<fileIndex>`) or typed text.
  *  Boxes and circles are drawn by the browser as small SVG files. */
 export type Part = Placement & (
-  | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf' }
+  // colorMap: this file's own colour choices, ahead of the request-wide one (so Box/Circle are never touched)
+  | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf'; colorMap?: Record<string, ColorChoice> }
   | { kind: 'text'; text: TextSpec }
 );
 
@@ -82,6 +83,8 @@ export interface ProcessRequest {
 
 export interface PreviewLayer { kind: OpKind; part: number; paths: [Mm, Mm][][] }
 export interface PartPaths { part: number; paths: [Mm, Mm][][] }
+/** A colour found in a part, and what the file itself makes it (null: the student has to choose). */
+export interface PartColor { part: number; key: string; kind: OpKind | null }
 
 export interface ProcessResponse {
   preview: PreviewLayer[];                  // bed mm, per part and op, for the canvas
@@ -92,6 +95,7 @@ export interface ProcessResponse {
   frameRd: string | null;  // base64, laser-off trace of bbox
   estimateS: number;
   unknownColors: string[];
+  partColors?: PartColor[];                 // every colour in every file part, for the colour list
   warnings: string[];
   errors: string[];
 }

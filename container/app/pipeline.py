@@ -9,7 +9,7 @@ from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, I
 from .geometry.hatch import hatch
 from .geometry.order import nearest_neighbour, order_cuts
 from .geometry.transform import bbox, place
-from .models import ContainerJob, OpKind, OpSettings, Part, PartPaths, PreviewLayer, ProcessResponse
+from .models import ContainerJob, FilePart, OpKind, OpSettings, Part, PartColor, PartPaths, PreviewLayer, ProcessResponse
 from .ruida.encoder import EncLayer, clamp_settings, encode_job, frame_layers, machine_converter
 
 LAYER_ORDER: tuple[OpKind, ...] = ("engrave", "score", "cut")
@@ -115,15 +115,23 @@ def process(job: ContainerJob) -> ProcessResponse:
 
     # colour → op, honouring the student's answers
     kept: list[tuple[int, Item]] = []
+    waiting: list[tuple[int, Item]] = []
     unknown: list[str] = []
+    seen: set[tuple[int, str]] = set()
     for pi, it in items:
-        choice = req.color_map.get(it.key)
+        part = req.parts[pi]
+        own = part.color_map if isinstance(part, FilePart) else {}
+        if isinstance(part, FilePart) and (pi, it.key) not in seen:
+            seen.add((pi, it.key))
+            res.part_colors.append(PartColor(part=pi, key=it.key, kind=it.kind))
+        choice = own.get(it.key) or req.color_map.get(it.key)
         if choice == "ignore":
             continue
         kind = choice or it.kind
         if kind is None:
             if it.key not in unknown:
                 unknown.append(it.key)
+            waiting.append((pi, it))
             continue
         if kind not in mat.ops:
             warnings.add(f"{mat.name} can't be {VERB[kind]}, so those lines were skipped.")
@@ -132,7 +140,6 @@ def process(job: ContainerJob) -> ProcessResponse:
     res.unknown_colors = unknown
     res.warnings = list(warnings)
     # Lines still waiting for the student's colour choice are drawn too (grey), so the part is never blank.
-    waiting = [(pi, it) for pi, it in items if it.key in unknown]
     boxes = []
     for pi in range(len(req.parts)):
         mine = [it for p, it in kept + waiting if p == pi]

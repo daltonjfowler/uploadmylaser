@@ -160,8 +160,8 @@ def _skip_reason(kind: str) -> Optional[str]:
 
 
 def _classify(style: Style) -> tuple[str, Optional[str]]:
-    """(key, kind). An unknown colour gets its own key, so choosing for it never changes the black, red or
-    blue lines on the same layer."""
+    """(key, kind). Every colour on a layer gets its own key, so choosing for one colour never changes the
+    others on the same layer (the page lists each one to change)."""
     if style.rgb is not None:
         rgb = tuple(style.rgb)
     elif style.aci == 7:  # black on paper, white on a dark screen
@@ -169,7 +169,7 @@ def _classify(style: Style) -> tuple[str, Optional[str]]:
     else:
         rgb = tuple(aci_colors.aci2rgb(style.aci))
     kind = classify_dxf(style.layer, rgb)
-    return (f"dxf:{style.layer}" if kind else f"dxf:{style.layer}|{rgb_hex(*rgb)}"), kind
+    return f"dxf:{style.layer}|{rgb_hex(*rgb)}", kind
 
 
 def _paper_entities(doc: Drawing) -> list[DXFEntity]:

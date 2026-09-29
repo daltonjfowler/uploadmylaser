@@ -133,3 +133,13 @@ test('copies may share one file', () => {
   const r = validateProcessRequest({ ...good(), parts: [filePart(), filePart(), filePart()] }, FILES);
   assert.equal(r.parts.length, 3);
 });
+
+test('a file part may carry its own colorMap, checked like the request-wide one', () => {
+  const b = good();
+  b.parts[2].colorMap = { 'dxf:0': 'score', 'dxf:0|#00ff00': 'ignore' };
+  assert.deepEqual(validateProcessRequest(b, FILES).parts[2].colorMap, b.parts[2].colorMap);
+  rejects({ ...good(), parts: [{ ...filePart(), colorMap: { 'dxf:0': 'burn' } }] });
+  rejects({ ...good(), parts: [{ ...filePart(), colorMap: 'cut' }] });
+  const t = { ...textPart(), colorMap: { x: 'cut' } };
+  assert.equal('colorMap' in validateProcessRequest({ ...good(), parts: [t] }, FILES).parts[0], false);
+});

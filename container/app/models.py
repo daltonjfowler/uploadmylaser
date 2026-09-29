@@ -72,6 +72,7 @@ class FilePart(Placement):
     kind: Literal["file"] = "file"
     file_index: int = Field(ge=0)
     file_type: Literal["svg", "dxf"]
+    color_map: dict[str, ColorChoice] = {}  # this file's own choices, ahead of ProcessRequest.color_map
 
 
 class TextPart(Placement):
@@ -109,6 +110,12 @@ class PartPaths(_Camel):
     paths: list[list[tuple[float, float]]]
 
 
+class PartColor(_Camel):
+    part: int
+    key: str
+    kind: Optional[OpKind]  # what the file itself makes it; None = the student has to choose
+
+
 class ProcessResponse(_Camel):
     preview: list[PreviewLayer] = []
     unassigned: list[PartPaths] = []  # lines whose colour the student hasn't chosen yet, per part
@@ -118,5 +125,6 @@ class ProcessResponse(_Camel):
     frame_rd: Optional[str] = None
     estimate_s: float = 0.0
     unknown_colors: list[str] = []
+    part_colors: list[PartColor] = []  # every colour in every file part, for the colour list
     warnings: list[str] = []
     errors: list[str] = []

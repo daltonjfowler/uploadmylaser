@@ -86,7 +86,8 @@ function validatePart(p: unknown, n: number, fileFields: ReadonlySet<number>): P
       bad(`The file for part ${n} is missing. Try adding it again.`);
     }
     if (fileType !== 'svg' && fileType !== 'dxf') bad(`Part ${n} must be an SVG or DXF file.`);
-    return { kind: 'file', fileIndex, fileType, ...placement };
+    const colorMap = validateColorMap(p.colorMap);
+    return { kind: 'file', fileIndex, fileType, ...placement, ...(colorMap ? { colorMap } : {}) };
   }
 
   if (p.kind === 'text') {

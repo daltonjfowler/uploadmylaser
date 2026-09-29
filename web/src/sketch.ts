@@ -1,7 +1,7 @@
 // In-browser previews, so the tools work before the class phrase is entered (or while the server
 // works). Boxes and circles are exact. Text and SVG files are close. DXF shows a grey outline of its lines
 // (dxf.ts). The server's preview replaces these as soon as it arrives.
-import type { OpKind, Placement, TextSpec } from '../../shared/contracts';
+import type { ColorChoice, OpKind, Placement, TextSpec } from '../../shared/contracts';
 import { TEXT_FONTS } from '../../shared/contracts';
 import { OP_COLORS, UNSURE } from './ops';
 import { sketchDxf, type DxfSketch } from './dxf';
@@ -9,7 +9,8 @@ import type { ShapeKind, ViewBox } from './shapes';
 import type { Box, PartView } from './workspace';
 
 export type Source =
-  | { kind: 'file'; name: string; fileType: 'svg' | 'dxf'; data: string }
+  /** colors: the student's choice per colour key (replaced, never changed in place: Undo shares it) */
+  | { kind: 'file'; name: string; fileType: 'svg' | 'dxf'; data: string; colors?: Record<string, ColorChoice> }
   | { kind: 'text'; text: TextSpec }
   | { kind: 'shape'; shape: ShapeKind; wMm: number; hMm: number; op: OpKind }
   /** Library shapes and the Line/Curve tools: an SVG path stretched from its bounds `vb` to wMm x hMm. */

@@ -127,7 +127,7 @@ def test_true_colours_count():
     doc.layers.add("L").rgb = (0, 0, 255)       # layer true colour blue: engrave
     m.add_circle((50, 0), 10, dxfattribs={"layer": "L"})
     its, _ = items(doc)
-    assert kinds(its) == [("dxf:0", "score"), ("dxf:L", "engrave")]
+    assert kinds(its) == [("dxf:0|#ff0000", "score"), ("dxf:L|#0000ff", "engrave")]
 
 
 def test_block_on_red_layer_marks_its_layer_0_lines():
@@ -136,7 +136,7 @@ def test_block_on_red_layer_marks_its_layer_0_lines():
     doc.layers.add("RED", color=1)
     doc.modelspace().add_blockref("B", (10, 10), dxfattribs={"layer": "RED"})
     its, _ = items(doc)
-    assert kinds(its) == [("dxf:RED", "score")]
+    assert kinds(its) == [("dxf:RED|#ff0000", "score")]
 
 
 def test_byblock_colour_takes_the_block_references_colour():
@@ -144,7 +144,7 @@ def test_byblock_colour_takes_the_block_references_colour():
     doc.blocks.new("B").add_circle((0, 0), 5, dxfattribs={"color": 0})  # BYBLOCK
     doc.modelspace().add_blockref("B", (10, 10), dxfattribs={"color": 5})
     its, _ = items(doc)
-    assert kinds(its) == [("dxf:0", "engrave")]
+    assert kinds(its) == [("dxf:0|#0000ff", "engrave")]
 
 
 def test_near_colours_follow_the_svg_rules():
@@ -268,3 +268,42 @@ def test_inch_drawing_meant_as_mm_warns():
     doc.modelspace().add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True)
     res = run(dxf_bytes(doc))
     assert any("says it is in inches" in w for w in res.warnings)
+
+
+def test_every_file_colour_is_listed_and_can_change_again():
+    doc = new()
+    m = doc.modelspace()
+    m.add_circle((0, 0), 10)                            # black: cut
+    m.add_circle((50, 0), 10, dxfattribs={"color": 3})  # green: unknown
+    res = run(dxf_bytes(doc))
+    assert [(c.part, c.key, c.kind) for c in res.part_colors] == [(0, "dxf:0|#000000", "cut"), (0, "dxf:0|#00ff00", None)]
+    # a choice sits on the file part itself, and a known colour can be changed too
+    data = base64.b64encode(dxf_bytes(doc)).decode()
+    def with_map(cm):
+        part = FilePart(file_index=0, file_type="dxf", x_mm=200, y_mm=10, color_map=cm)
+        r = ProcessRequest(material_id="ply3", parts=[part])
+        return process(ContainerJob(request=r, material=MAT, machine=M, files_b64=[data]))
+    res2 = with_map({"dxf:0|#00ff00": "cut"})
+    assert res2.errors == [] and [p.kind for p in res2.preview] == ["cut"]
+    res3 = with_map({"dxf:0|#00ff00": "engrave", "dxf:0|#000000": "score"})
+    assert res3.errors == [] and [p.kind for p in res3.preview] == ["engrave", "score"]
+    # black and red on one layer are two colours: changing one leaves the other
+    m.add_circle((100, 0), 10, dxfattribs={"color": 1})
+    data = base64.b64encode(dxf_bytes(doc)).decode()
+    res4 = with_map({"dxf:0|#00ff00": "cut", "dxf:0|#000000": "engrave"})
+    assert res4.errors == [] and [p.kind for p in res4.preview] == ["engrave", "score", "cut"]
+    # the listed kind stays the file's own, so the page can offer "back to how the file had it"
+    assert [c.kind for c in res3.part_colors] == ["cut", None]
+
+
+def test_file_choice_does_not_touch_other_parts():
+    doc = new()
+    doc.modelspace().add_circle((0, 0), 10)  # black: cut
+    data = base64.b64encode(dxf_bytes(doc)).decode()
+    parts = [
+        FilePart(file_index=0, file_type="dxf", x_mm=200, y_mm=10, color_map={"dxf:0|#000000": "score"}),
+        FilePart(file_index=0, file_type="dxf", x_mm=400, y_mm=10),
+    ]
+    res = process(ContainerJob(request=ProcessRequest(material_id="ply3", parts=parts), material=MAT, machine=M, files_b64=[data]))
+    assert res.errors == []
+    assert sorted((p.part, p.kind) for p in res.preview) == [(0, "score"), (1, "cut")]

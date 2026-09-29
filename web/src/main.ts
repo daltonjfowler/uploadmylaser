@@ -813,7 +813,7 @@ function renderPalette(): void {
     b.className = 'swatchbtn' + (op === color ? ' on' : '');
     b.setAttribute('role', 'radio');
     b.setAttribute('aria-checked', String(op === color));
-    b.dataset.hint = `${OP_LABELS[op]}: new text and shapes use this. Click it with a text or shape selected to change it.`;
+    b.dataset.hint = `${OP_LABELS[op]}: new text and shapes use this. Click it with a text, shape or file selected to change it.`;
     const sw = document.createElement('span');
     sw.className = 'swatch';
     sw.style.background = OP_COLORS[op];
@@ -839,7 +839,14 @@ function applyColor(op: OpKind): void {
       else took = true;
       recoloured = true;
     }
-    else if (q?.source.kind === 'file') notes = ['Colours in a file come from the file itself: black cuts, red marks, blue engraves.'];
+    else if (q?.source.kind === 'file') {
+      // the whole file becomes this colour (each colour can be changed again in the colour list)
+      const keys = fileColors(q.id).map((c) => c.key);
+      if (keys.length) {
+        q.source.colors = { ...q.source.colors, ...Object.fromEntries(keys.map((k) => [k, op])) };
+        recoloured = took = true;
+      } else notes = ['Wait a moment for the file to be checked, then pick the colour again.'];
+    }
   }
   if (fellBack) {
     if (!took) color = 'score'; // nothing could take Engrave, so the palette shows what it really is
@@ -936,13 +943,35 @@ function renderLayers(): void {
   }));
 }
 
+/** The colours the server found in one part (from the last result), with what the file makes each one. */
+function fileColors(id: number): { key: string; kind: OpKind | null }[] {
+  const i = resultIds.indexOf(id);
+  return i < 0 ? [] : (result?.partColors ?? []).filter((c) => c.part === i);
+}
+
+/** What a colour in a file does now: the student's choice, else the old design-wide one, else the file's own. */
+function colorNow(s: Source & { kind: 'file' }, key: string, kind: OpKind | null): ColorChoice | null {
+  return s.colors?.[key] ?? colorMap[key] ?? kind;
+}
+
+/** Every colour in every file, grouped by file (pattern copies share one group), each one changeable any time. */
 function renderColors(): void {
-  const keys = result?.unknownColors ?? [];
-  $('colors').hidden = !keys.length;
   const ops = materials.find((m) => m.id === materialId)?.ops ?? RUN_ORDER;
-  $('colorList').replaceChildren(...keys.map((key) => {
-    const row = document.createElement('div');
-    row.className = 'colorrow';
+  const groups = new Map<string, { part: DesignPart & { source: { kind: 'file' } }; colors: { key: string; kind: OpKind | null }[] }>();
+  for (const p of parts) {
+    if (p.source.kind !== 'file' || groups.has(p.source.data)) continue;
+    const colors = fileColors(p.id);
+    if (colors.length) groups.set(p.source.data, { part: p as DesignPart & { source: { kind: 'file' } }, colors });
+  }
+  // an older server only lists the unknown ones
+  const oldUnknown = result && !result.partColors ? result.unknownColors : [];
+  const anyUnsure = [...groups.values()].some((g) => g.colors.some((c) => !colorNow(g.part.source, c.key, c.kind))) || oldUnknown.length > 0;
+  $('colors').hidden = !groups.size && !oldUnknown.length;
+  $('colorsTitle').textContent = anyUnsure ? 'What should these colours do?' : 'Colours in your files';
+
+  const row = (key: string, now: ColorChoice | null, pick: (c: ColorChoice) => void) => {
+    const div = document.createElement('div');
+    div.className = 'colorrow';
     const [kind, rest] = key.split(/:(.*)/s);
     // DXF keys are `dxf:LAYER` or, for a colour we don't know, `dxf:LAYER|#rrggbb`
     const [value, dxfColor] = kind === 'dxf' ? (rest ?? '').split(/\|(?=#[0-9a-f]{6}$)/i) : [rest];
@@ -950,18 +979,35 @@ function renderColors(): void {
     sw.className = 'swatch';
     const swatch = dxfColor ?? value;
     if (swatch?.startsWith('#')) sw.style.background = swatch;
+    else if (now && now !== 'ignore') sw.style.background = OP_COLORS[now];
     const label = document.createElement('span');
-    label.textContent = kind === 'dxf' ? `Layer "${value}"${dxfColor ? ' (this colour)' : ''}` : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
-    row.append(sw, label);
+    label.textContent = kind === 'dxf' ? `Layer "${value}"` : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
+    div.append(sw, label);
     for (const choice of [...ops, 'ignore'] as ColorChoice[]) {
       const btn = document.createElement('button');
-      btn.className = 'small';
+      btn.className = 'small' + (choice === now ? ' on' : '');
+      btn.setAttribute('aria-pressed', String(choice === now));
       btn.textContent = choice === 'ignore' ? 'Skip' : OP_LABELS[choice];
-      btn.onclick = () => { colorMap[key] = choice; changed(); };
-      row.append(btn);
+      btn.onclick = () => pick(choice);
+      div.append(btn);
     }
-    return row;
-  }));
+    return div;
+  };
+
+  const out: HTMLElement[] = [];
+  for (const [data, g] of groups) {
+    if (groups.size > 1) out.push(Object.assign(document.createElement('div'), { className: 'colorfile small muted', textContent: g.part.source.name }));
+    for (const c of g.colors) {
+      out.push(row(c.key, colorNow(g.part.source, c.key, c.kind), (choice) => {
+        for (const q of parts) { // copies of the same file change together
+          if (q.source.kind === 'file' && q.source.data === data) q.source.colors = { ...q.source.colors, [c.key]: choice };
+        }
+        changed();
+      }));
+    }
+  }
+  for (const key of oldUnknown) out.push(row(key, colorMap[key] ?? null, (choice) => { colorMap[key] = choice; changed(); }));
+  $('colorList').replaceChildren(...out);
 }
 
 // ---------- processing (debounced round-trip to the container) ----------
@@ -1130,7 +1176,8 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
         fileOf.set(data, fileIndex);
       }
       if (s.kind === 'shape' || s.kind === 'path') { pl.scale = 1; delete pl.scaleY; }
-      reqParts.push({ ...pl, kind: 'file', fileIndex, fileType: s.kind === 'file' ? s.fileType : 'svg' });
+      const own = s.kind === 'file' && s.colors && Object.keys(s.colors).length ? { colorMap: s.colors } : {};
+      reqParts.push({ ...pl, kind: 'file', fileIndex, fileType: s.kind === 'file' ? s.fileType : 'svg', ...own });
     }
     ids.push(p.id);
   }
