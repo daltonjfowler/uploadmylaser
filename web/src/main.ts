@@ -17,6 +17,7 @@ import { fromBase64 } from './ruida/swizzle';
 import { LaserLink } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
+import { pieceSvg, splitPieces, type Line } from './ungroup';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -455,6 +456,35 @@ $('rotate').onclick = () => {
   changed();
 };
 $('delete').onclick = deleteSelected;
+$('ungroup').onclick = ungroup;
+
+const MAX_PIECES = 60;
+
+/** Replace the selected file with one file per piece, in the same place, from the server's last answer. */
+function ungroup(): void {
+  const p = find(selected);
+  if (!p || p.source.kind !== 'file') return;
+  const i = resultIds.indexOf(p.id);
+  const say = (t: string) => { notes = [t]; render(); };
+  if (pending || !result || i < 0) return say('Wait a moment for the file to be checked, then press Ungroup again.');
+  if (result.unassigned?.some((u) => u.part === i)) return say('Choose what each colour does first (under Layers), then press Ungroup.');
+  const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
+  if (!lines.length) return say('Nothing in this file to ungroup.');
+  const pieces = splitPieces(lines);
+  if (pieces.length < 2) return say('This file is already one piece. (Holes and anything inside an outline stay with it.)');
+  if (pieces.length > MAX_PIECES) return say(`This file has ${pieces.length} pieces. Ungroup works up to ${MAX_PIECES}.`);
+  if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`That would be more than ${MAX_PARTS} parts in one design.`);
+  const name = p.source.name.replace(/\.(dxf|svg)$/i, '');
+  const made: DesignPart[] = pieces.map((pc, k) => ({
+    id: nextId++,
+    source: { kind: 'file', name: `${name} piece ${k + 1}`, fileType: 'svg', data: pieceSvg(pc) },
+    xMm: round(pc.box[2]), yMm: round(pc.box[1]), scale: 1, rotateDeg: 0, // top-right corner, like every part
+  }));
+  parts.splice(parts.indexOf(p), 1, ...made);
+  notes = [`Split into ${made.length} pieces. They are all selected: click one to move it alone.`];
+  changed();
+  setGroup(made.map((q) => q.id));
+}
 $('selectAll').onclick = selectAll;
 $('zoomIn').onclick = () => ws.zoomBy(1.3);
 $('zoomOut').onclick = () => ws.zoomBy(1 / 1.3);
@@ -1263,6 +1293,7 @@ function render(): void {
   $('messages').replaceChildren(...errors.map((e) => li(e, 'err')), ...notes.map((n) => li(n, 'note')), ...warnings.map((w) => li(w, 'warn')));
   $('estimate').textContent = result?.rd && !pending ? `About ${fmtTime(result.estimateS)} on the laser.` : '';
   $('rotate').toggleAttribute('disabled', selected === null);
+  $('ungroup').toggleAttribute('disabled', find(selected)?.source.kind !== 'file');
   $('delete').toggleAttribute('disabled', !selection().length);
   $('selectAll').toggleAttribute('disabled', !parts.length);
   $('zoomDesign').toggleAttribute('disabled', !parts.length);
