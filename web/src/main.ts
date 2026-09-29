@@ -17,7 +17,7 @@ import { fromBase64 } from './ruida/swizzle';
 import { LaserLink } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
-import { pieceSvg, splitPieces, type Line } from './ungroup';
+import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -130,7 +130,13 @@ function viewOf(p: DesignPart): PartView {
     const unassigned = (result.unassigned ?? []).filter((u) => u.part === i).flatMap((u) => u.paths);
     return { id: p.id, box, layers: result.preview.filter((l) => l.part === i), unassigned };
   }
-  return localView(p, render);
+  return localView(p, renderSoon);
+}
+
+let frame = 0;
+/** One redraw per screen frame: a design with hundreds of pieces loads hundreds of sketches at once. */
+function renderSoon(): void {
+  if (!frame) frame = requestAnimationFrame(() => { frame = 0; render(); });
 }
 
 function boxOf(id: number): Box | null {
@@ -478,11 +484,45 @@ function ungroup(): void {
     xMm: round(pc.box[2]), yMm: round(pc.box[1]), scale: 1, rotateDeg: 0, // top-right corner, like every part
   }));
   parts.splice(parts.indexOf(p), 1, ...made);
+  showPiecesNow(result, made, pieces);
   // nothing selected afterwards: with every piece selected they move as one and look still grouped
   select(null);
   changed();
   warn(`Split into ${made.length} pieces. Click a piece to move or delete it on its own.`, '✓');
 }
+/** Until the server answers, draw the pieces from their own lines (the result they came from, renumbered).
+ *  Otherwise every piece loads a sketch image, and a floorplan's thousands of them keep the page too busy. */
+function showPiecesNow(old: ProcessResponse, made: DesignPart[], pieces: Piece[]): void {
+  const at = new Map(made.map((q, k) => [q.id, k]));
+  const ids: number[] = [];
+  const next: ProcessResponse = { ...old, preview: [], unassigned: [], partBoxes: [], partColors: [], rd: null, frameRd: null, warnings: [], errors: [] };
+  for (const q of parts) {
+    const k = at.get(q.id);
+    const n = ids.length;
+    if (k !== undefined) {
+      const pc = pieces[k];
+      for (const kind of RUN_ORDER) {
+        const paths = pc.lines.filter((l) => l.kind === kind).map((l) => l.pts);
+        if (paths.length) {
+          next.preview.push({ kind, part: n, paths });
+          next.partColors!.push({ part: n, key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind });
+        }
+      }
+      next.partBoxes.push(pc.box);
+    } else {
+      const i = resultIds.indexOf(q.id);
+      if (i < 0) continue;
+      for (const l of old.preview) if (l.part === i) next.preview.push({ ...l, part: n });
+      for (const u of old.unassigned ?? []) if (u.part === i) next.unassigned.push({ ...u, part: n });
+      for (const c of old.partColors ?? []) if (c.part === i) next.partColors!.push({ ...c, part: n });
+      next.partBoxes.push(old.partBoxes[i]);
+    }
+    ids.push(q.id);
+  }
+  result = next;
+  resultIds = ids;
+}
+
 $('selectAll').onclick = selectAll;
 $('zoomIn').onclick = () => ws.zoomBy(1.3);
 $('zoomOut').onclick = () => ws.zoomBy(1 / 1.3);

@@ -255,3 +255,35 @@ def test_process_route_goes_through_the_runner():
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["errors"] == [] and body["rd"] and body["frameRd"]
+
+
+def test_grid_nearest_matches_the_plain_one():
+    import random
+    from app.geometry import order
+    rnd = random.Random(7)
+    paths = [[(rnd.uniform(0, 800), rnd.uniform(0, 600)), (rnd.uniform(0, 800), rnd.uniform(0, 600))] for _ in range(order.GRID_ABOVE * 4)]
+    for rev in (True, False):
+        grid = order._grid_nearest(paths, (0.0, 0.0), rev)
+        # plain greedy, forced past the grid threshold
+        old = order.GRID_ABOVE
+        order.GRID_ABOVE = 10**9
+        try:
+            plain = order.nearest_neighbour(paths, (0.0, 0.0), rev)
+        finally:
+            order.GRID_ABOVE = old
+        assert grid == plain
+
+
+def test_big_floorplan_still_cuts_holes_first():
+    # 1200 plates, each with a hole: every hole must be cut before its plate
+    paths = []
+    for i in range(1200):
+        x, y = (i % 40) * 20.0, (i // 40) * 20.0
+        paths.append([(x, y), (x + 15, y), (x + 15, y + 15), (x, y + 15), (x, y)])
+        paths.append([(x + 5, y + 5), (x + 10, y + 5), (x + 10, y + 10), (x + 5, y + 10), (x + 5, y + 5)])
+    t = time.monotonic()
+    out = order_cuts(paths)
+    assert time.monotonic() - t < FAST_S
+    pos = {id(p): k for k, p in enumerate(out)}
+    for i in range(0, len(paths), 2):
+        assert pos[id(paths[i + 1])] < pos[id(paths[i])]

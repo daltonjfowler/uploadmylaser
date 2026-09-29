@@ -190,7 +190,7 @@ async function processDesign(req: Request, env: Env): Promise<Response> {
   for (const [k, v] of form.entries()) {
     if (typeof v === 'string') continue;
     total += v.size;
-    const mm = /^file(\d{1,3})$/.exec(k);
+    const mm = /^file(\d{1,4})$/.exec(k);
     if (mm && Number(mm[1]) < MAX_PARTS && String(Number(mm[1])) === mm[1]) files.set(Number(mm[1]), v);
   }
   if (total > MAX_UPLOAD_BYTES) throw new HttpError(413, tooBig);

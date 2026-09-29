@@ -3,7 +3,7 @@ import base64
 import pytest
 from pydantic import ValidationError
 
-from app.models import ContainerJob, FilePart, MachineConfig, Material, OpSettings, ProcessRequest, TextPart, TextSpec
+from app.models import MAX_PARTS, ContainerJob, FilePart, MachineConfig, Material, OpSettings, ProcessRequest, TextPart, TextSpec
 from app.pipeline import process
 from app.geometry.order import order_cuts
 from app.geometry.hatch import hatch
@@ -179,7 +179,7 @@ def test_camel_case_job_parses_both_part_kinds():
     with pytest.raises(ValidationError):
         ProcessRequest(material_id="ply3", parts=[])
     with pytest.raises(ValidationError):
-        ProcessRequest(material_id="ply3", parts=[FilePart(file_index=0, file_type="svg")] * 101)
+        ProcessRequest(material_id="ply3", parts=[FilePart(file_index=0, file_type="svg")] * (MAX_PARTS + 1))
 
 
 def test_top_right_placement_anchor():

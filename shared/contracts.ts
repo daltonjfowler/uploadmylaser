@@ -101,7 +101,7 @@ export interface ProcessResponse {
 }
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // all files in one request together
-export const MAX_PARTS = 300; // room for patterns and Ungroup (copies of one file share its fileIndex)
+export const MAX_PARTS = 5000; // room for patterns and Ungroup (copies of one file share its fileIndex)
 // Class phrases (src/phrase.ts). A teacher's own phrase can be any length (Dalton's call,
 // 2026-09-28): a short one is the teacher's choice, and the per-IP limit still slows guessing.
 // Generated phrases (web/src/phrase-words.ts) are long and hard to guess.

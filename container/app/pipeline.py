@@ -140,13 +140,19 @@ def process(job: ContainerJob) -> ProcessResponse:
     res.unknown_colors = unknown
     res.warnings = list(warnings)
     # Lines still waiting for the student's colour choice are drawn too (grey), so the part is never blank.
+    # grouped by part in one pass: a floorplan can have thousands of parts
+    by_part: dict[int, list[Item]] = {}
+    for p, it in kept + waiting:
+        by_part.setdefault(p, []).append(it)
+    waiting_by_part: dict[int, list[list[Pt]]] = {}
+    for p, it in waiting:
+        waiting_by_part.setdefault(p, []).append(it.pts)
     boxes = []
     for pi in range(len(req.parts)):
-        mine = [it for p, it in kept + waiting if p == pi]
+        mine = by_part.get(pi)
         boxes.append(_round_box(bbox(mine)) if mine else None)
-        paths = [it.pts for p, it in waiting if p == pi]
-        if paths:
-            res.unassigned.append(PartPaths(part=pi, paths=_round(paths)))
+        if pi in waiting_by_part:
+            res.unassigned.append(PartPaths(part=pi, paths=_round(waiting_by_part[pi])))
     res.part_boxes = boxes
     if unknown:
         res.errors.append("Choose what each colour should do.")
@@ -191,9 +197,11 @@ def process(job: ContainerJob) -> ProcessResponse:
             paths = shown = nearest_neighbour([i.pts for _, i in group])
         else:
             paths = shown = order_cuts([i.pts for _, i in group])
+        shown_by_part: dict[int, list[list[Pt]]] = {}
+        for p in shown:
+            shown_by_part.setdefault(owner[id(p[0])], []).append(p)
         for pi in sorted({pi for pi, _ in group}):
-            mine = [p for p in shown if owner[id(p[0])] == pi]
-            res.preview.append(PreviewLayer(kind=kind, part=pi, paths=_round(mine)))
+            res.preview.append(PreviewLayer(kind=kind, part=pi, paths=_round(shown_by_part.get(pi, []))))
         if paths:
             layers.append((kind, s, paths))
     res.warnings = list(warnings)

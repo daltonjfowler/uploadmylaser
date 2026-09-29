@@ -81,7 +81,7 @@ class TextPart(Placement):
 
 
 Part = Annotated[Union[FilePart, TextPart], Field(discriminator="kind")]
-MAX_PARTS = 300
+MAX_PARTS = 5000
 
 
 class ProcessRequest(_Camel):
