@@ -20,6 +20,7 @@ import type { MachineConfig, Material } from '../shared/contracts.ts';
 import { MAX_PARTS, MAX_UPLOAD_BYTES } from '../shared/contracts.ts';
 import { ipAllowed, parseCidrList, type Cidr } from './cidr.ts';
 import { anyKeyEquals, constantTimeEquals } from './constant-time.ts';
+import { validateTestCard } from './testcard.ts';
 import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
 import { checkIpLimit } from './ip-limit.ts';
@@ -146,6 +147,12 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
         await env.CLASS_KV.delete(PHRASE_KEY);
         return json({ ok: true });
       }
+    }
+    if (p === '/api/teacher/testcard' && m === 'POST') {
+      const card = validateTestCard(await readJson(req, MAX_TEACHER_BYTES));
+      const r = await callContainer(env, '/testcard', JSON.stringify({ ...card, machine: await getMachine(env), airAssist: true }));
+      if (r.status !== 200) throw new HttpError(502, 'The laser processor could not make that test card. Try again.');
+      return new Response(r.text, { headers: { 'content-type': 'application/json' } });
     }
     if (p === '/api/teacher/warmup' && m === 'POST') {
       try {

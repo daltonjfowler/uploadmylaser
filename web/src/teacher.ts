@@ -3,6 +3,9 @@
 import type { MachineConfig, Material, OpKind, OpSettings } from '../../shared/contracts';
 import { MAX_PHRASE_LENGTH } from '../../shared/contracts';
 import { deviceId } from './device';
+import { cleanPanelName } from './ruida/panel';
+import { fromBase64 } from './ruida/swizzle';
+import { LaserLink } from './serial/laser';
 import { OP_LABELS } from './ops';
 import { generatePhrase } from './phrase-words';
 import { initThemeButton } from './theme';
@@ -341,3 +344,86 @@ phraseInput.value = generatePhrase();
 setInterval(tick, 1000);
 tick();
 if (keyInput.value) void refresh(); // a remembered key shows what is live without a click
+
+// ---------- material test card ----------
+
+interface Card { rd: string; cells: { row: number; col: number; powerPct: number; speedMmS: number }[]; sizeMm: [number, number]; estimateS: number }
+let card: Card | null = null;
+let link: LaserLink | null = null;
+
+function steps(a: number, b: number, n: number): number[] {
+  return Array.from({ length: n }, (_, i) => Math.round((a + ((b - a) * i) / (n - 1)) * 10) / 10);
+}
+
+function num(id: string): number {
+  return Number($<HTMLInputElement>(id).value);
+}
+
+$('tcMake').onclick = async () => {
+  const n = Number($<HTMLSelectElement>('tcSteps').value);
+  const op = $<HTMLSelectElement>('tcOp').value as OpKind;
+  const body = { op, powers: steps(num('tcP0'), num('tcP1'), n), speeds: steps(num('tcS0'), num('tcS1'), n), hatchMm: num('tcHatch') || 0.1 };
+  $('tcMsg').textContent = 'Making it…';
+  try {
+    card = await api<Card>('/api/teacher/testcard', 'POST', body);
+  } catch (e) {
+    $('tcMsg').textContent = (e as Error).message;
+    return;
+  }
+  const cap = machine?.absoluteMaxPowerPct ?? 100;
+  $('tcMsg').textContent = `${card.sizeMm[0]} × ${card.sizeMm[1]} mm, about ${Math.max(1, Math.round(card.estimateS / 60))} min.`
+    + (body.powers.some((p) => p > cap) ? ` Squares above ${cap}% run at ${cap}% (the machine limit).` : '');
+  const table = document.createElement('table');
+  table.className = 'tctable';
+  const head = table.insertRow();
+  head.insertCell().textContent = 'speed ↓  power →';
+  for (const p of body.powers) head.insertCell().textContent = `${Math.min(p, cap)}%`;
+  body.speeds.forEach((sp) => {
+    const r = table.insertRow();
+    r.insertCell().textContent = `${sp} mm/s`;
+    for (let c = 0; c < body.powers.length; c++) r.insertCell().textContent = '■';
+  });
+  $('tcTable').replaceChildren(table);
+  $('tcResult').hidden = false;
+};
+
+$('tcDownload').onclick = () => {
+  if (!card) return;
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([fromBase64(card.rd) as BlobPart])), download: 'TESTCARD.rd' });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+};
+
+$('tcConnect').onclick = async () => {
+  try {
+    link ??= new LaserLink({ baud: machine.baud, magic: machine.swizzleMagic, onDisconnect: () => { $<HTMLButtonElement>('tcSend').disabled = true; $('tcStop').hidden = true; } });
+    await link.connect();
+    $<HTMLButtonElement>('tcSend').disabled = false;
+    $('tcStop').hidden = false;
+    $('tcMsg').textContent = 'Laser connected.';
+  } catch (e) {
+    $('tcMsg').textContent = (e as Error).message;
+  }
+};
+
+$('tcSend').onclick = async () => {
+  if (!card || !link?.connected) return;
+  try {
+    $('tcMsg').textContent = 'Sending…';
+    await link.sendToPanel(fromBase64(card.rd), cleanPanelName('TESTCARD'));
+    $('tcMsg').textContent = 'Loaded on the laser as TESTCARD. Pick it on the panel, Frame, then Start.';
+  } catch (e) {
+    $('tcMsg').textContent = (e as Error).message;
+  }
+};
+
+$('tcStop').onclick = async () => {
+  try {
+    await link?.stop();
+    $('tcMsg').textContent = 'Stop sent.';
+  } catch {
+    $('tcMsg').textContent = 'Could not send STOP. Press the red E-stop button on the laser!';
+  }
+};
+// Esc stops the laser too, like the student page.
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && link?.connected) $('tcStop').click(); });

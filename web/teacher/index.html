@@ -83,6 +83,31 @@
     <h2 class="cap">Machine</h2>
     <div id="machine" class="grid2"></div>
     <div class="row"><button id="saveMachine">Save machine</button> <span id="machMsg" class="small"></span></div>
+
+    <h2 class="cap">Material test card</h2>
+    <p class="note">Burns a grid of 10 mm squares on scrap, each at a different power (across) and speed (down),
+      so you can see which settings work on a new material. The machine's power limit still applies to every
+      square. The small L mark is the top-left corner.</p>
+    <div class="grid2">
+      <label>Job <select id="tcOp"><option value="engrave">Engrave (filled)</option><option value="score">Mark (line)</option><option value="cut">Cut through</option></select></label>
+      <label>Steps <select id="tcSteps"><option>3</option><option selected>5</option><option>7</option></select></label>
+      <label>Power from <input id="tcP0" type="number" min="1" max="100" step="any" value="10"> %</label>
+      <label>to <input id="tcP1" type="number" min="1" max="100" step="any" value="50"> %</label>
+      <label>Speed from <input id="tcS0" type="number" min="1" max="1000" step="any" value="100"> mm/s</label>
+      <label>to <input id="tcS1" type="number" min="1" max="1000" step="any" value="300"> mm/s</label>
+      <label>Engrave line spacing <input id="tcHatch" type="number" min="0.03" max="1" step="any" value="0.1"> mm</label>
+    </div>
+    <div class="row"><button id="tcMake" class="go">Make test card</button> <span id="tcMsg" class="small"></span></div>
+    <div id="tcResult" hidden>
+      <div id="tcTable"></div>
+      <div class="row">
+        <button id="tcDownload">⬇ Download laser file</button>
+        <button id="tcConnect">Connect laser</button>
+        <button id="tcSend" class="go" disabled>Send to laser</button>
+        <button id="tcStop" class="stop" hidden>STOP</button>
+      </div>
+      <p class="note">Send only loads it (as TESTCARD). On the laser, pick it, press Frame, then Start. Stay at the machine.</p>
+    </div>
   </div>
 
   <footer class="pagefoot"><span><a href="/">Back to the laser page</a></span><span><a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a> <a href="https://uploadmymodel.com" target="_blank" rel="noopener">uploadmymodel</a> <a href="https://uploadmycut.com" target="_blank" rel="noopener">uploadmycut</a> <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a> <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a> <a href="/legal" target="_blank" rel="noopener">Privacy &amp; legal</a> <a href="https://github.com/daltonjfowler/uploadmylaser" target="_blank" rel="noopener">Open source</a></span></footer>

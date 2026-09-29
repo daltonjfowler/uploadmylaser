@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .models import ContainerJob, ProcessResponse
+from .testcard import CardRequest, CardResponse, build_test_card
 from .runner import get_runner
 
 
@@ -28,3 +29,9 @@ def health() -> dict[str, bool]:
 def process_route(job: ContainerJob) -> ProcessResponse:
     # sync def → FastAPI runs it in a threadpool while a worker process does the geometry (app/runner.py)
     return get_runner().run(job)
+
+
+@app.post("/testcard", response_model=CardResponse, response_model_by_alias=True)
+def testcard_route(req: CardRequest) -> CardResponse:
+    # teacher only (the Worker checks the key); small and bounded: at most 7 x 7 squares
+    return build_test_card(req)
