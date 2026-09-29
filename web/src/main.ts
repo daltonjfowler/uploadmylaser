@@ -458,8 +458,6 @@ $('rotate').onclick = () => {
 $('delete').onclick = deleteSelected;
 $('ungroup').onclick = ungroup;
 
-const MAX_PIECES = 60;
-
 /** Replace the selected file with one file per piece, in the same place, from the server's last answer. */
 function ungroup(): void {
   const p = find(selected);
@@ -472,8 +470,7 @@ function ungroup(): void {
   if (!lines.length) return say('Nothing in this file to ungroup.');
   const pieces = splitPieces(lines);
   if (pieces.length < 2) return say('This file is already one piece.');
-  if (pieces.length > MAX_PIECES) return say(`This file has ${pieces.length} pieces. Ungroup works up to ${MAX_PIECES}.`);
-  if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`That would be more than ${MAX_PARTS} parts in one design.`);
+  if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`This file has ${pieces.length} pieces, and one design can have ${MAX_PARTS} parts. Remove some parts first, or split it in AutoCAD.`);
   const name = p.source.name.replace(/\.(dxf|svg)$/i, '');
   const made: DesignPart[] = pieces.map((pc, k) => ({
     id: nextId++,
@@ -511,6 +508,8 @@ function select(id: number | null): void {
   }
   ws.setSelected(id);
   renderSizebar();
+  renderColors(); // with many files it shows the selected one's colours
+  $('ungroup').toggleAttribute('disabled', find(id)?.source.kind !== 'file');
 }
 
 /** The colour of a text, shape or line (files carry their own colours). */
@@ -980,6 +979,10 @@ function fileColors(id: number): { key: string; kind: OpKind | null }[] {
   return i < 0 ? [] : (result?.partColors ?? []).filter((c) => c.part === i);
 }
 
+/** Pattern copies share name and data. Ungroup pieces have their own names, so two identical pieces stay separate. */
+const copyKey = (s: Source & { kind: 'file' }) => `${s.name}
+${s.data}`;
+
 /** What a colour in a file does now: the student's choice, else the old design-wide one, else the file's own. */
 function colorNow(s: Source & { kind: 'file' }, key: string, kind: OpKind | null): ColorChoice | null {
   return s.colors?.[key] ?? colorMap[key] ?? kind;
@@ -990,9 +993,9 @@ function renderColors(): void {
   const ops = materials.find((m) => m.id === materialId)?.ops ?? RUN_ORDER;
   const groups = new Map<string, { part: DesignPart & { source: { kind: 'file' } }; colors: { key: string; kind: OpKind | null }[] }>();
   for (const p of parts) {
-    if (p.source.kind !== 'file' || groups.has(p.source.data)) continue;
+    if (p.source.kind !== 'file' || groups.has(copyKey(p.source))) continue;
     const colors = fileColors(p.id);
-    if (colors.length) groups.set(p.source.data, { part: p as DesignPart & { source: { kind: 'file' } }, colors });
+    if (colors.length) groups.set(copyKey(p.source), { part: p as DesignPart & { source: { kind: 'file' } }, colors });
   }
   // an older server only lists the unknown ones
   const oldUnknown = result && !result.partColors ? result.unknownColors : [];
@@ -1026,12 +1029,19 @@ function renderColors(): void {
   };
 
   const out: HTMLElement[] = [];
-  for (const [data, g] of groups) {
+  const MANY = 6;
+  let shown = [...groups];
+  if (groups.size > MANY) {
+    const picked = selection().map(find).filter((q) => q?.source.kind === 'file').map((q) => copyKey(q!.source as Source & { kind: 'file' }));
+    shown = shown.filter(([data, g]) => picked.includes(data) || g.colors.some((c) => !colorNow(g.part.source, c.key, c.kind)));
+    out.push(Object.assign(document.createElement('p'), { className: 'small muted', textContent: `${groups.size} files. Select one to change its colours.` }));
+  }
+  for (const [copies, g] of shown) {
     if (groups.size > 1) out.push(Object.assign(document.createElement('div'), { className: 'colorfile small muted', textContent: g.part.source.name }));
     for (const c of g.colors) {
       out.push(row(c.key, colorNow(g.part.source, c.key, c.kind), (choice) => {
         for (const q of parts) { // copies of the same file change together
-          if (q.source.kind === 'file' && q.source.data === data) q.source.colors = { ...q.source.colors, [c.key]: choice };
+          if (q.source.kind === 'file' && copyKey(q.source) === copies) q.source.colors = { ...q.source.colors, [c.key]: choice };
         }
         changed();
       }));

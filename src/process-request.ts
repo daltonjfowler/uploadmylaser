@@ -9,7 +9,7 @@ import { MAX_PARTS, TEXT_FONTS } from '../shared/contracts.ts';
 import { HttpError } from './http.ts';
 import { OPS } from './presets.ts';
 
-export const MAX_REQUEST_JSON_BYTES = 64 * 1024;
+export const MAX_REQUEST_JSON_BYTES = 192 * 1024; // ~300 parts with their colour choices
 export const MAX_COORD_MM = 5000;
 export const MAX_SCALE = 20;
 export const MAX_TEXT_CHARS = 60;
