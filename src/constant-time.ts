@@ -4,6 +4,12 @@
 
 const encoder = new TextEncoder();
 
+/** True when `given` equals any of `keys`. Every key is compared, so the time does not say which one. */
+export async function anyKeyEquals(given: string, keys: string[]): Promise<boolean> {
+  const hits = await Promise.all(keys.map((k) => constantTimeEquals(given, k)));
+  return hits.some(Boolean);
+}
+
 export async function constantTimeEquals(a: string, b: string): Promise<boolean> {
   const [left, right] = await Promise.all([
     crypto.subtle.digest('SHA-256', encoder.encode(a)),

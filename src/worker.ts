@@ -19,7 +19,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { MachineConfig, Material } from '../shared/contracts.ts';
 import { MAX_PARTS, MAX_UPLOAD_BYTES } from '../shared/contracts.ts';
 import { ipAllowed, parseCidrList, type Cidr } from './cidr.ts';
-import { constantTimeEquals } from './constant-time.ts';
+import { anyKeyEquals, constantTimeEquals } from './constant-time.ts';
 import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
 import { checkIpLimit } from './ip-limit.ts';
@@ -44,6 +44,7 @@ interface Env {
   PHRASE_IP_LIMIT: RateLimit; // wrangler.jsonc "ratelimits"
   PROCESS_IP_LIMIT: RateLimit;
   TEACHER_KEY?: string; // secret: npx wrangler secret put TEACHER_KEY
+  TEACHER_KEY_2?: string; // optional second teacher (a student teacher); delete the secret to remove them
   ALLOWED_CIDRS?: string;
 }
 
@@ -297,9 +298,9 @@ async function teacherGate(req: Request, env: Env): Promise<void> {
   const who = lockoutSubject(req.headers.get('x-device-id'), req.headers.get('cf-connecting-ip') ?? '');
   const store = lockoutStore();
   const prior = await checkLockout(store, 'teacher', who, Date.now());
-  const expected = env.TEACHER_KEY ?? '';
-  if (expected === '') console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
-  else if (await constantTimeEquals(req.headers.get('x-teacher-key') ?? '', expected)) {
+  const keys = [env.TEACHER_KEY, env.TEACHER_KEY_2].filter((k): k is string => !!k);
+  if (!keys.length) console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
+  else if (await anyKeyEquals(req.headers.get('x-teacher-key') ?? '', keys)) {
     await recordRight(store, 'teacher', who, prior);
     return;
   }
