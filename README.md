@@ -46,6 +46,15 @@ the file. There is a [dark mode](docs/screenshot-student-dark.png) too.
   opens a menu with the colours, Group, Ungroup, Rotate, Delete and Hide/Show.
 - **Hide a colour.** Each layer has a Hide/Show button. It only changes the screen: hidden lines still
   run on the laser. While the server works on a change, an "Updating the laser lines..." sign shows.
+- **Make things.** A **Box maker** for finger-joint boxes sized to the material (outside or inside size,
+  lid or open, Fit loose/snug/tight). **Cut an outline around** any part, with an optional **keyring
+  hole**: type a name and you have a keychain. **Weld** joins overlapping shapes, so script names cut
+  out cleanly. Text can be up to four centred lines.
+- **Arrange.** Copy, paste and duplicate (Ctrl+C / V / D), **Mirror** left-right or up-down, **Align**
+  and space evenly, and **My material**: the student's board size drawn on the bed, with a warning
+  when the design is bigger.
+- **Photo (beta).** Import a PNG or JPG; the browser turns it into dots (brightness, contrast, detail,
+  dots or black and white) and only the dots are sent. A photo engraves; it is never cut through.
 - **Design files.** Designs autosave to the Chromebook's `localStorage`. **Save** writes the whole design
   as a `.uml` file that Open or Import brings back on any computer.
 - **Runs in a safe order.** Engrave, then Mark, then Cut through, always last with all its passes,
@@ -65,6 +74,8 @@ the file. There is a [dark mode](docs/screenshot-student-dark.png) too.
 - **Teacher page.** Materials and presets (materials named PVC, vinyl and other unsafe plastics are refused by name; a
   name check cannot know what a sheet really is), machine
   settings, the class phrase, and a warm-up button for the container.
+- **Material test card** (teacher page): a grid of 10 mm squares at 3, 5 or 7 powers and speeds, to set up a
+  new material. The machine's power limit still applies to every square.
 - **Cost caps.** Scale-to-zero containers that sleep after 5 minutes, a per-Chromebook rate limit, a
   global ceiling, a 10 MB upload cap and a processing timeout.
 - **Private by default.** No student accounts, no server-side storage of designs, self-hosted fonts,
