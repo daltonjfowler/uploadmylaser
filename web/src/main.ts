@@ -20,7 +20,8 @@ import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
 import { zip } from './zip';
 import { boxPanels, outsideSize } from './boxmaker';
-import { runCount, toDots, toPbm } from './photo';
+import { adjust, runCount, toDots, toPbm } from './photo';
+import { pointCount, toDxf, trace, type Pt as TracePt } from './trace';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -1650,7 +1651,23 @@ function photoDialog(f: File): Promise<Source | null> {
     img.onerror = () => { URL.revokeObjectURL(url); warn('That picture could not be opened. Try a PNG or JPG.'); resolve(null); };
     img.onload = () => {
       let made: { data: string; preview: string; lines: number } | null = null;
-      const redraw = () => { made = drawPhoto(img); };
+      let traced: TracePt[][] | null = null;
+      const tracing = () => $<HTMLSelectElement>('phMode').value === 'trace';
+      const redraw = () => {
+        for (const el of document.querySelectorAll<HTMLElement>('.ph-trace')) el.hidden = !tracing();
+        for (const el of document.querySelectorAll<HTMLElement>('.ph-dots')) el.hidden = tracing();
+        $('phAdd').textContent = tracing() ? 'Add outlines' : 'Add photo';
+        if (tracing()) { traced = drawTrace(img); made = null; } else { made = drawPhoto(img); traced = null; }
+      };
+      const baseName = f.name.replace(/\.[^.]*$/, '');
+      const tracedSvg = () => {
+        const op = $<HTMLSelectElement>('phOp').value as OpKind;
+        const all = traced!.flat();
+        const box: [number, number, number, number] = [Math.min(...all.map((p) => p[0])), Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[0])), Math.max(...all.map((p) => p[1]))];
+        return pieceSvg({ lines: traced!.map((l) => ({ kind: op, pts: [...l, l[0]] })), box });
+      };
+      $('phSvg').onclick = () => { if (traced?.length) void saveBlob(new Blob([tracedSvg()], { type: 'image/svg+xml' }), `${baseName}-trace.svg`, 'SVG drawing', '.svg'); };
+      $('phDxf').onclick = () => { if (traced?.length) void saveBlob(new Blob([toDxf(traced)], { type: 'application/dxf' }), `${baseName}-trace.dxf`, 'DXF drawing', '.dxf'); };
       const form = $<HTMLFormElement>('photoForm');
       const done = (src: Source | null) => {
         $('photoDlg').hidden = true;
@@ -1663,16 +1680,89 @@ function photoDialog(f: File): Promise<Source | null> {
       form.oninput = redraw;
       form.onsubmit = (ev) => {
         ev.preventDefault();
+        if (tracing()) {
+          if (!traced?.length) return;
+          done({ kind: 'file', name: `${baseName} (trace).svg`, fileType: 'svg', data: tracedSvg() });
+          return;
+        }
         if (!made) return;
         if (made.lines > MAX_PHOTO_LINES) return;
-        done({ kind: 'file', name: f.name.replace(/\.[^.]*$/, '') + ' (photo)', fileType: 'pbm', data: made.data, preview: made.preview });
+        done({ kind: 'file', name: baseName + ' (photo)', fileType: 'pbm', data: made.data, preview: made.preview });
       };
       $('phCancel').onclick = () => done(null);
+      $<HTMLSelectElement>('phOp').value = color;
       $('photoDlg').hidden = false;
       redraw();
     };
     img.src = url;
   });
+}
+
+const MAX_TRACE_POINTS = 40_000;
+
+function traceSize(loops: TracePt[][]): string {
+  const all = loops.flat();
+  const w = Math.max(...all.map((q) => q[0])) - Math.min(...all.map((q) => q[0]));
+  const h = Math.max(...all.map((q) => q[1])) - Math.min(...all.map((q) => q[1]));
+  return `${round(w, 1)} × ${round(h, 1)} mm`;
+}
+
+/** Image Trace: the picture in black and white, traced into outlines (mm). Draws them in the preview. */
+function drawTrace(img: HTMLImageElement): TracePt[][] {
+  const wMm = clamp(Number($<HTMLInputElement>('phW').value) || 60, 10, 400);
+  const hMm = Math.min(400, (wMm * img.naturalHeight) / Math.max(img.naturalWidth, 1));
+  const w = Math.min(900, Math.max(40, Math.round(Math.max(img.naturalWidth, 40)))); // trace detail, not print size
+  const h = Math.max(1, Math.round((w * hMm) / wMm));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, w, h);
+  g.drawImage(img, 0, 0, w, h);
+  const px = g.getImageData(0, 0, w, h).data;
+  const grey = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) grey[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+  const look = { brightness: Number($<HTMLInputElement>('phB').value), contrast: Number($<HTMLInputElement>('phC').value), invert: $<HTMLInputElement>('phInv').checked, mode: 'threshold' as const };
+  const cut = Number($<HTMLInputElement>('phT').value);
+  const g2 = adjust(grey, look);
+  const ink = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) ink[i] = g2[i] < cut ? 1 : 0;
+  const mmPerPx = wMm / w;
+  const slider = (id: string) => { const v = Number($<HTMLInputElement>(id).value); $(`${id}v`).textContent = String(v); return v; };
+  slider('phT');
+  // Detail 0..100: how closely the outline follows the pixels (3 px off at 0, 0.3 px at 100)
+  const tolerancePx = 3 - (slider('phDetail') / 100) * 2.7;
+  // Clean up 0..100: drop specks up to about 25 mm² (0 keeps everything), growing gently
+  const minAreaMm = (slider('phClean') / 100) ** 2 * 25;
+  const loops = trace(ink, w, h, mmPerPx, { minAreaPx: Math.max(2, minAreaMm / (mmPerPx * mmPerPx)), tolerancePx, smooth: slider('phSmooth') });
+  // preview: the outlines filled, on the page's wood colour
+  const prev = $<HTMLCanvasElement>('photoPrev');
+  const k = Math.min(1, 700 / w);
+  prev.width = Math.round(w * k);
+  prev.height = Math.round(h * k);
+  const pg = prev.getContext('2d')!;
+  pg.fillStyle = '#fdf8ee';
+  pg.fillRect(0, 0, prev.width, prev.height);
+  pg.beginPath();
+  const s = k / mmPerPx;
+  for (const l of loops) l.forEach(([x, y], i) => (i ? pg.lineTo(x * s, y * s) : pg.moveTo(x * s, y * s)));
+  pg.closePath();
+  pg.fillStyle = 'rgba(37,99,235,0.35)';
+  pg.fill('evenodd');
+  pg.strokeStyle = '#111827';
+  pg.lineWidth = 1;
+  pg.stroke();
+  const n = pointCount(loops);
+  const tooMany = n > MAX_TRACE_POINTS;
+  $('phInfo').textContent = !loops.length
+    ? 'Nothing to trace. Move Threshold or Brightness until the dark parts show.'
+    : tooMany ? `Too detailed (${n.toLocaleString()} points). Pick more Clean up or Smooth, or a simpler picture.`
+      : `${loops.length} shapes, ${n.toLocaleString()} points, ${traceSize(loops)} (the picture is ${Math.round(wMm)} mm wide; blank edges are left off).`;
+  $<HTMLButtonElement>('phAdd').disabled = !loops.length || tooMany;
+  $<HTMLButtonElement>('phSvg').disabled = !loops.length;
+  $<HTMLButtonElement>('phDxf').disabled = !loops.length;
+  return loops;
 }
 
 /** The picture at the chosen size and detail, as dots: draws the preview and returns the PBM. */

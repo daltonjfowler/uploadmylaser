@@ -55,6 +55,9 @@ the file. There is a [dark mode](docs/screenshot-student-dark.png) too.
   when the design is bigger.
 - **Photo (beta).** Import a PNG or JPG; the browser turns it into dots (brightness, contrast, detail,
   dots or black and white) and only the dots are sent. A photo engraves; it is never cut through.
+- **Image trace.** The same window traces a logo or drawing into outlines (Threshold, Detail, Smooth and
+  Clean up sliders), to cut, mark or engrave, or to download as SVG or DXF for AutoCAD. The tracer is
+  written for this project (`web/src/trace.ts`).
 - **Design files.** Designs autosave to the Chromebook's `localStorage`. **Save** writes the whole design
   as a `.uml` file that Open or Import brings back on any computer.
 - **Runs in a safe order.** Engrave, then Mark, then Cut through, always last with all its passes,

@@ -264,3 +264,4 @@ kbd { font: 600 .8rem ui-monospace, Consolas, monospace; padding: 1px 5px; borde
 .tctable td { border: 1px solid var(--line); padding: 4px 8px; text-align: center; }
 .tctable tr:first-child td, .tctable td:first-child { font-weight: 600; background: var(--btn); }
 .photoprev { display: block; max-width: 100%; max-height: 300px; margin: 8px auto; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 6px; }
+.slide { display: inline-flex; align-items: center; gap: 6px; } .slide output { min-width: 2.5em; font-variant-numeric: tabular-nums; color: var(--muted); }

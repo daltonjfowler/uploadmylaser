@@ -210,6 +210,7 @@
             <li>Cutting out a joined-up (script) name? Tick <b>Weld</b> so the letters join into one shape.</li>
             <li><b>Mirror</b> flips a design, for engraving the back of glass or acrylic. <b>Align</b> lines up several parts.</li>
             <li><b>Photo (beta)</b>: Import a PNG or JPG. Start small: photos take a while to engrave.</li>
+            <li><b>Image trace</b>: Import a PNG or JPG and pick <b>Trace to outlines</b>. Threshold, Detail, Smooth and Clean up change the outlines; download them as SVG or DXF too.</li>
             <li>Type your board's size under <b>My material</b> to see it on the bed.</li>
             <li><b>Group</b> ties parts together. <b>Ungroup</b> unties them, or splits a file into its separate shapes.</li>
             <li><b>Hide</b> on a colour only hides it on the screen. Hidden lines still run on the laser.</li>
@@ -230,18 +231,31 @@
 
   <div id="photoDlg" class="gate" hidden>
     <form id="photoForm" class="card wide">
-      <h2>Photo (beta)</h2>
-      <p class="muted small">Turns a picture into dots the laser engraves. Try a small one first: photos can take a while.</p>
+      <h2>Picture</h2>
+      <p class="muted small"><b>Dots</b> engrave a photo (beta: try a small one first). <b>Trace</b> turns a logo or drawing into outlines you can cut, mark or engrave, or download as SVG or DXF.</p>
       <canvas id="photoPrev" class="photoprev" aria-label="How the photo will engrave"></canvas>
       <div class="row">
         <label>Width <input id="phW" type="number" min="10" max="200" step="any" value="60"> mm</label>
-        <label>Detail <select id="phRes"><option value="0.3">Fast</option><option value="0.2" selected>Normal</option><option value="0.15">Fine</option></select></label>
-        <label>Style <select id="phMode"><option value="dither" selected>Dots (photos)</option><option value="threshold">Black and white (logos)</option></select></label>
+        <label class="ph-dots">Detail <select id="phRes"><option value="0.3">Fast</option><option value="0.2" selected>Normal</option><option value="0.15">Fine</option></select></label>
+        <label>Style <select id="phMode"><option value="dither" selected>Dots (photos)</option><option value="threshold">Black and white (logos)</option><option value="trace">Trace to outlines (like Image Trace)</option></select></label>
       </div>
       <div class="row">
         <label>Brightness <input id="phB" type="range" min="-100" max="100" value="0"></label>
         <label>Contrast <input id="phC" type="range" min="-100" max="100" value="0"></label>
         <label><input id="phInv" type="checkbox"> Invert</label>
+      </div>
+      <div class="row ph-trace" hidden>
+        <label class="slide">Threshold <input id="phT" type="range" min="10" max="245" value="128"> <output id="phTv">128</output></label>
+        <label class="slide">Detail <input id="phDetail" type="range" min="0" max="100" value="60"> <output id="phDetailv">60</output></label>
+        <label class="slide">Smooth <input id="phSmooth" type="range" min="0" max="3" value="1"> <output id="phSmoothv">1</output></label>
+        <label class="slide">Clean up <input id="phClean" type="range" min="0" max="100" value="30"> <output id="phCleanv">30</output></label>
+      </div>
+      <div class="row ph-trace" hidden>
+        <label>Use as <select id="phOp"><option value="cut">Cut through</option><option value="score">Mark</option><option value="engrave">Engrave</option></select></label>
+      </div>
+      <div class="row ph-trace" hidden>
+        <button type="button" id="phSvg">⬇ Download SVG</button>
+        <button type="button" id="phDxf">⬇ Download DXF (for AutoCAD)</button>
       </div>
       <p id="phInfo" class="small muted"></p>
       <div class="row"><button id="phAdd" class="go">Add photo</button> <button type="button" id="phCancel">Cancel</button></div>
