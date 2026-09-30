@@ -1180,7 +1180,8 @@ function renderLayers(): void {
     const eye = document.createElement('button');
     eye.type = 'button';
     eye.className = 'eye small' + (hiddenOps.has(op) ? ' off' : '');
-    eye.textContent = hiddenOps.has(op) ? 'Show' : 'Hide';
+    eye.textContent = '👁';
+    eye.setAttribute('aria-label', `${hiddenOps.has(op) ? 'Show' : 'Hide'} ${OP_LABELS[op]}`);
     eye.setAttribute('aria-pressed', String(hiddenOps.has(op)));
     eye.dataset.hint = `${hiddenOps.has(op) ? 'Show' : 'Hide'} the ${OP_LABELS[op]} lines on the screen. Hidden lines still run on the laser.`;
     eye.onclick = () => toggleHidden(op);
@@ -1242,7 +1243,7 @@ function toggleHidden(op: OpKind): void {
 
 function openMenu(at: { x: number; y: number }): void {
   const ids = selection();
-  const items: ([string, () => void] | null)[] = [];
+  const items: MenuItem[] = [];
   if (ids.length) {
     const mat = materials.find((m) => m.id === materialId);
     for (const op of [...RUN_ORDER].reverse()) {
@@ -1264,7 +1265,10 @@ function openMenu(at: { x: number; y: number }): void {
   showMenu(at, items);
 }
 
-function showMenu(at: { x: number; y: number }, items: ([string, () => void] | null)[]): void {
+/** A menu line: label, what it does, greyed out?, shortcut shown on the right. null = a divider. */
+type MenuItem = [string, () => void, boolean?, string?] | null;
+
+function showMenu(at: { x: number; y: number }, items: MenuItem[]): void {
   const menu = $('ctxmenu');
   while (items[0] === null) items.shift();
   while (items.at(-1) === null) items.pop();
@@ -1273,7 +1277,9 @@ function showMenu(at: { x: number; y: number }, items: ([string, () => void] | n
     const b = document.createElement('button');
     b.type = 'button';
     b.setAttribute('role', 'menuitem');
-    b.textContent = it[0];
+    b.disabled = !!it[2];
+    b.append(Object.assign(document.createElement('span'), { textContent: it[0] }));
+    if (it[3]) b.append(Object.assign(document.createElement('kbd'), { textContent: it[3] }));
     b.onclick = () => { closeMenu(); it[1](); };
     return b;
   }));
@@ -1287,7 +1293,88 @@ function showMenu(at: { x: number; y: number }, items: ([string, () => void] | n
 
 function closeMenu(): void {
   $('ctxmenu').hidden = true;
+  openMenuName = '';
+  for (const b of document.querySelectorAll('.menubtn')) b.classList.remove('on');
 }
+
+// ---------- the menu bar ----------
+
+let openMenuName = '';
+let pictureStyle: 'trace' | 'dither' | null = null; // the Picture window opens on this style
+
+/** Press one of the hidden action buttons, and say whether it is greyed out. */
+const act = (label: string, id: string, key?: string): MenuItem => [label, () => $(id).click(), $<HTMLButtonElement>(id).disabled, key];
+
+function pickPicture(style: 'trace' | 'dither'): void {
+  pictureStyle = style;
+  $<HTMLInputElement>('pictureFile').click();
+}
+
+function menuItems(name: string): MenuItem[] {
+  const n = selection().length;
+  const hasJob = !!result?.rd && !pending && !result.errors.length;
+  switch (name) {
+    case 'file': return [
+      act('Open… (start over)', 'open'), act('Import… (add to the bed)', 'import'),
+      ['Trace an image… (logo or drawing)', () => pickPicture('trace')], ['Engrave a photo…', () => pickPicture('dither')], null,
+      act('Save design (.uml)', 'save'), null,
+      ['Export for teacher', () => $('exportTeacher').click(), !parts.length], ['Download laser file (.rd)', () => $('downloadRd').click(), !hasJob],
+    ];
+    case 'edit': return [
+      act('Undo', 'undo', 'Ctrl+Z'), act('Redo', 'redo', 'Ctrl+Y'), null,
+      ['Copy', copySelected, !n, 'Ctrl+C'], ['Paste', paste, !clipboard.length, 'Ctrl+V'], ['Duplicate', duplicateSelected, !n, 'Ctrl+D'], null,
+      act('Select all', 'selectAll', 'Ctrl+A'), act('Delete', 'delete', 'Del'),
+    ];
+    case 'arrange': return [
+      act('Rotate a quarter turn', 'rotate'), ['Mirror left-right', () => mirrorSelected('x'), !n], ['Mirror up-down', () => mirrorSelected('y'), !n], null,
+      ...(Object.keys(ALIGN_LABELS) as AlignHow[]).map((how): MenuItem => [ALIGN_LABELS[how], () => alignSelected(how), n < 2]), null,
+      act('Group', 'group'), act('Ungroup', 'ungroup'),
+    ];
+    case 'make': return [
+      ['Text', () => $('toolText').click()], ['Box', () => $('toolBox').click()], ['Circle', () => $('toolCircle').click()],
+      ['Line', () => $('toolLine').click()], ['Curve', () => $('toolCurve').click()], ['Shapes…', () => $('toolShapes').click()], null,
+      ['Box maker…', () => $('toolBoxMaker').click()], ['Trace an image…', () => pickPicture('trace')], ['Engrave a photo…', () => pickPicture('dither')], null,
+      ['Pattern (copies in rows)…', () => $('toolPattern').click(), selected === null],
+    ];
+    case 'view': return [
+      act('Zoom in', 'zoomIn'), act('Zoom out', 'zoomOut'), act('Whole bed', 'zoomBed'), act('My design', 'zoomDesign'), null,
+      ...RUN_ORDER.map((op): MenuItem => [`${hiddenOps.has(op) ? 'Show' : 'Hide'} ${OP_LABELS[op]}`, () => toggleHidden(op)]),
+    ];
+    default: return [];
+  }
+}
+
+function openBarMenu(btn: HTMLElement): void {
+  const name = btn.dataset.menu ?? '';
+  if (openMenuName === name) return closeMenu(); // a second click closes it
+  closeMenu();
+  const r = btn.getBoundingClientRect();
+  showMenu({ x: r.left, y: r.bottom + 2 }, menuItems(name));
+  openMenuName = name;
+  btn.classList.add('on');
+}
+for (const btn of document.querySelectorAll<HTMLElement>('.menubtn')) {
+  btn.addEventListener('pointerdown', (e) => e.stopPropagation()); // not "a click outside the menu"
+  btn.addEventListener('click', () => openBarMenu(btn));
+  // with one menu open, pointing at the next one opens it, like a desktop menu bar
+  btn.addEventListener('pointerenter', () => { if (openMenuName && openMenuName !== btn.dataset.menu) { closeMenu(); openBarMenu(btn); } });
+}
+$('ctxmenu').addEventListener('keydown', (e) => {
+  const items = [...$('ctxmenu').querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+  const i = items.indexOf(document.activeElement as HTMLButtonElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  }
+});
+$('toolPicture').onclick = () => pickPicture('trace');
+$('quickPicture').onclick = () => pickPicture('trace');
+$<HTMLInputElement>('pictureFile').onchange = async (ev) => {
+  const input = ev.target as HTMLInputElement;
+  const f = input.files?.[0];
+  input.value = '';
+  if (f) await openAny(f, false);
+};
 document.addEventListener('pointerdown', (e) => {
   const t = e.target as HTMLElement;
   if (e.button === 2 && t.id === 'ws') return; // the right click that just opened it
@@ -1691,6 +1778,8 @@ function photoDialog(f: File): Promise<Source | null> {
       };
       $('phCancel').onclick = () => done(null);
       $<HTMLSelectElement>('phOp').value = color;
+      if (pictureStyle) $<HTMLSelectElement>('phMode').value = pictureStyle;
+      pictureStyle = null;
       $('photoDlg').hidden = false;
       redraw();
     };

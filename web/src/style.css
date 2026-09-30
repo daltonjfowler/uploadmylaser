@@ -265,3 +265,16 @@ kbd { font: 600 .8rem ui-monospace, Consolas, monospace; padding: 1px 5px; borde
 .tctable tr:first-child td, .tctable td:first-child { font-weight: 600; background: var(--btn); }
 .photoprev { display: block; max-width: 100%; max-height: 300px; margin: 8px auto; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 6px; }
 .slide { display: inline-flex; align-items: center; gap: 6px; } .slide output { min-width: 2.5em; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.menubar { display: flex; gap: 2px; }
+.menubtn { background: transparent; border-color: transparent; font-weight: 600; }
+.menubtn:hover, .menubtn.on { background: var(--btn); border-color: var(--line); }
+.toolbar .grow { flex: 1; }
+.ctxmenu button { display: flex; justify-content: space-between; gap: 18px; }
+.ctxmenu button:disabled { opacity: .45; cursor: default; background: transparent; }
+.ctxmenu kbd { font: inherit; font-size: .78rem; color: var(--muted); }
+.layertop .eye { min-width: 36px; font-size: 1rem; line-height: 1; padding: 4px 8px; }
+.layertop .eye.off { opacity: .55; text-decoration: line-through; border-color: #b45309; }
+/* the left draw tools always fit: shorter buttons on short screens, and a scroll if still needed */
+.tools { overflow-y: auto; min-height: 0; }
+@media (max-height: 820px) { .tool { padding: 3px 2px; font-size: 1.05rem; gap: 0; } .tools { gap: 3px; } }

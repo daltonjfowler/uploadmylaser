@@ -25,40 +25,52 @@
     <button id="stopTop" class="stop" hidden data-hint="Stops the laser right away. Esc does the same.">STOP</button>
   </header>
 
-  <nav class="toolbar" aria-label="File and edit">
-    <button id="open" data-hint="Open: start over with this file. Clears the workspace.">📂 Open…</button>
-    <button id="save" data-hint="Save: keep your whole design as a file (.uml). Open it later, on any computer, to carry on.">💾 Save</button>
-    <button id="import" data-hint="Import: add this file to what's already here, like a logo next to your name.">➕ Import…</button>
+  <nav class="toolbar" aria-label="Menus">
+    <div class="menubar" role="menubar">
+      <button class="menubtn" data-menu="file" aria-haspopup="menu">File ▾</button>
+      <button class="menubtn" data-menu="edit" aria-haspopup="menu">Edit ▾</button>
+      <button class="menubtn" data-menu="arrange" aria-haspopup="menu">Arrange ▾</button>
+      <button class="menubtn" data-menu="make" aria-haspopup="menu">Make ▾</button>
+      <button class="menubtn" data-menu="view" aria-haspopup="menu">View ▾</button>
+    </div>
     <span class="sep"></span>
     <button id="undo" disabled data-hint="Undo the last change. (Ctrl+Z)">↶ Undo</button>
     <button id="redo" disabled data-hint="Redo what you undid. (Ctrl+Y)">↷ Redo</button>
-    <span class="sep"></span>
-    <button id="selectAll" data-hint="Select every part, to move them together. (Ctrl+A) Shift+click adds or removes one part.">⬚ Select all</button>
-    <button id="rotate" data-hint="Turn the selected part a quarter turn.">⟳ Rotate</button>
-    <button id="mirror" data-hint="Mirror the selected parts left-right. Right-click for up-down.">⇋ Mirror</button>
-    <button id="align" data-hint="Line up the selected parts, or space them evenly.">☰ Align</button>
-    <button id="group" data-hint="Group: tie the selected parts together, so clicking one selects and moves them all. (Drag a box on the bed, or Shift+click, to select several.)">▣ Group</button>
-    <button id="ungroup" data-hint="Ungroup: untie a group, or split the selected file into its separate shapes, to move or delete each one.">⧉ Ungroup</button>
     <button id="delete" data-hint="Remove the selected part. (Delete key)">🗑 Delete</button>
     <span class="sep"></span>
+    <button id="quickPicture" data-hint="Picture: trace a logo or drawing into outlines, or engrave a photo.">🖼 Trace an image</button>
+    <span class="grow"></span>
     <button id="zoomOut" data-hint="Zoom out. (Mouse wheel works too)">−</button>
     <button id="zoomIn" data-hint="Zoom in.">+</button>
-    <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
-    <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
+    <!-- The actions the menus run. Hidden: the menus and shortcuts press them. -->
+    <div id="actions" hidden>
+      <button id="open" data-hint="Open: start over with this file. Clears the workspace.">📂 Open…</button>
+      <button id="save" data-hint="Save: keep your whole design as a file (.uml). Open it later, on any computer, to carry on.">💾 Save</button>
+      <button id="import" data-hint="Import: add this file to what's already here, like a logo next to your name.">➕ Import…</button>
+      <button id="selectAll" data-hint="Select every part, to move them together. (Ctrl+A) Shift+click adds or removes one part.">⬚ Select all</button>
+      <button id="rotate" data-hint="Turn the selected part a quarter turn.">⟳ Rotate</button>
+      <button id="mirror" data-hint="Mirror the selected parts left-right. Right-click for up-down.">⇋ Mirror</button>
+      <button id="align" data-hint="Line up the selected parts, or space them evenly.">☰ Align</button>
+      <button id="group" data-hint="Group: tie the selected parts together, so clicking one selects and moves them all. (Drag a box on the bed, or Shift+click, to select several.)">▣ Group</button>
+      <button id="ungroup" data-hint="Ungroup: untie a group, or split the selected file into its separate shapes, to move or delete each one.">⧉ Ungroup</button>
+      <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
+      <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
+    </div>
     <input type="file" id="openFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
     <input type="file" id="importFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
+    <input type="file" id="pictureFile" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden>
   </nav>
 
   <div class="sizebar" id="sizebar">
     <span id="selName" class="muted">Nothing selected. Click a part to select it.</span>
     <span id="selControls" hidden>
-      <label id="xyBox" data-hint="Where the middle of the part sits. 0, 0 is the bed's top-right corner.">X <input id="selX" type="number" step="1"> Y <input id="selY" type="number" step="1"></label>
       <label data-hint="Width. The height follows when 🔒 is on, so it keeps its shape. For several parts, this is the box around them all.">W <input id="selW" type="number" step="1" min="1"></label>
       <label data-hint="Height.">H <input id="selH" type="number" step="1" min="1"></label>
       <span class="unit u">mm</span>
       <label id="lenField" hidden data-hint="How long the line is. Its first point stays put.">Length <input id="selLen" type="number" step="0.1" min="0.1"> <span class="u">mm</span></label>
       <label id="angField" hidden data-hint="The line's angle: 0° points right, 90° points up. Its first point stays put.">Angle <input id="selAng" type="number" step="1"> °</label>
       <button id="lock" class="lockbtn" type="button" aria-pressed="true" data-hint="Lock: corner squares and typed sizes keep the shape. Unlock to stretch from the corners too. Side squares always stretch one way. (Shift while dragging a corner flips it.)">🔒</button>
+      <label id="xyBox" data-hint="Where the middle of the part sits. 0, 0 is the bed's top-right corner.">X <input id="selX" type="number" step="1"> Y <input id="selY" type="number" step="1"></label>
       <span id="pctBox">
         <label data-hint="Size as a percent of the original. Type 100 for the original size.">Scale <input id="selPct" type="number" step="1" min="1"></label>
         <span id="pctY" hidden><label data-hint="Height as a percent of the original.">× <input id="selPctY" type="number" step="1" min="1"></label></span>
@@ -83,6 +95,7 @@
       <button id="toolLine" class="tool" data-hint="Line: click two points, or drag. Shift keeps it straight or at 45°.">╱<span>Line</span></button>
       <button id="toolCurve" class="tool" data-hint="Curve: click points to draw a smooth curve. Click the first point to close it.">∿<span>Curve</span></button>
       <button id="toolShapes" class="tool" data-hint="Shapes: stars, hearts, sports balls, callouts and more.">★<span>Shapes</span></button>
+      <button id="toolPicture" class="tool" data-hint="Picture: trace a logo or drawing into outlines (like Image Trace), or engrave a photo.">🖼<span>Picture</span></button>
       <button id="toolBoxMaker" class="tool" data-hint="Box maker: a box with finger joints that press together, sized for your material.">📦<span>Box maker</span></button>
       <button id="toolPattern" class="tool" data-hint="Pattern: make copies of the selected part in rows and columns.">▦<span>Pattern</span></button>
     </aside>
@@ -204,6 +217,7 @@
             <li><b>Black</b> cuts through, <b style="color:#dc2626">red</b> marks a line, <b style="color:#2563eb">blue</b> engraves (fills). The laser always runs Engrave, then Mark, then Cut through.</li>
             <li>The green dot is the <b>top-right corner</b> of your design. Move the laser head there on the machine.</li>
             <li><b>Send to laser</b> only loads your design. Then, on the laser, press <b>Frame</b> (the head traces the outline with the beam off) to check it fits your material, and press <b>Start</b>.</li>
+            <li>The <b>File, Edit, Arrange, Make</b> and <b>View</b> menus at the top hold every command; right-click the bed for the common ones.</li>
             <li><b>Open</b> starts over with a file. <b>Import</b> adds a file next to what's there. <b>Save</b> keeps your whole design as a <b>.uml</b> file to open again later.</li>
             <li><b>Box maker</b> (left tools) makes a finger-joint box for your material. Measure your board; if the fingers are too tight or loose, change Fit.</li>
             <li>A name keychain: type your name, then under <b>Selected part</b> tick <b>Cut an outline around it</b> and <b>Keyring hole</b>.</li>
