@@ -582,12 +582,24 @@ export class Workspace {
 
   // ---------- drawing ----------
 
+  private frame = 0;
+  private cw = 0;
+  private ch = 0;
+
+  /** Redraw on the next screen frame. A mouse or pen sends many moves a frame, and a big design is
+   *  slow to draw, so asking many times still draws once. */
   draw(): void {
+    if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.paint(); });
+  }
+
+  private paint(): void {
     const c = this.canvas;
     const dpr = devicePixelRatio || 1;
     const cw = c.clientWidth;
     const ch = c.clientHeight;
     if (!cw || !ch) return;
+    this.cw = cw;
+    this.ch = ch;
     if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) {
       c.width = Math.round(cw * dpr);
       c.height = Math.round(ch * dpr);
@@ -767,6 +779,9 @@ export class Workspace {
     if (!p.box) return;
     const g = this.g;
     const { s, ox, oy } = this.view;
+    const lb = this.liveBox(p)!;
+    // off screen (zoomed in on a big floor plan): nothing to draw
+    if (ox + lb[2] * s < -4 || ox + lb[0] * s > this.cw + 4 || oy + lb[3] * s < -4 || oy + lb[1] * s > this.ch + 4) return;
     const lv = this.live?.ids.includes(p.id) ? this.live : null;
     // bed mm → screen, including a live move/resize (the from box mapped onto the to box)
     const [a, b] = lv ? [lv.from, lv.to] : [p.box, p.box];
@@ -802,7 +817,7 @@ export class Workspace {
       g.restore();
     }
     const sk = p.sketch as (Sketch & { color?: string }) | undefined;
-    if (sk && ![...this.hidden].some((k) => OP_COLORS[k] === sk.color)) this.drawSketch(sk, this.liveBox(p)!);
+    if (sk && ![...this.hidden].some((k) => OP_COLORS[k] === sk.color)) this.drawSketch(sk, lb);
 
   }
 

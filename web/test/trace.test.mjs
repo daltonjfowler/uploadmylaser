@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { area, pointCount, simplify, smoothLoop, toDxf, trace, traceLoops } from '../src/trace.ts';
+import { area, bounds, pointCount, simplify, smoothLoop, toDxf, trace, traceLoops } from '../src/trace.ts';
 
 /** A bitmap from rows of '#' (ink) and '.' (blank). */
 function bits(rows) {
@@ -56,4 +56,25 @@ test('the DXF has one closed polyline per loop, in mm, y up', () => {
   assert.ok(dxf.includes('$INSUNITS\r\n70\r\n4'));
   assert.ok(dxf.startsWith('0\r\nSECTION') && dxf.trimEnd().endsWith('EOF'));
   assert.ok(dxf.includes('10\r\n10\r\n20\r\n5\r\n')); // (10, 0) becomes y = 5 - 0
+});
+
+test('a busy photo (hundreds of thousands of points) traces, and its DXF and size do not run out of stack', () => {
+  const w = 600, h = 600;
+  let seed = 1;
+  const ink = Uint8Array.from({ length: w * h }, () => ((seed = (seed * 16807) % 2147483647) / 2147483647 < 0.5 ? 1 : 0));
+  const loops = trace(ink, w, h, 0.1, { minAreaPx: 2, tolerancePx: 0.3, smooth: 0 });
+  assert.ok(pointCount(loops) > 100_000, `only ${pointCount(loops)} points`);
+  const [x0, y0, x1, y1] = bounds(loops);
+  assert.ok(x0 >= 0 && y0 >= 0 && x1 <= 60 && y1 <= 60 && x1 > 50);
+  assert.ok(toDxf(loops).trimEnd().endsWith('EOF'));
+});
+
+test('a long smooth outline simplifies without recursion trouble', () => {
+  const circle = Array.from({ length: 200_000 }, (_, i) => [Math.cos(i / 31831) * 1000, Math.sin(i / 31831) * 1000]);
+  const out = simplify(circle, 0.5);
+  assert.ok(out.length > 20 && out.length < 2000, `${out.length} points`);
+});
+
+test('bounds of nothing is a zero box', () => {
+  assert.deepEqual(bounds([]), [0, 0, 0, 0]);
 });

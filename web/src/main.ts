@@ -21,7 +21,7 @@ import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
 import { zip } from './zip';
 import { boxPanels, outsideSize } from './boxmaker';
 import { adjust, runCount, toDots, toPbm } from './photo';
-import { pointCount, toDxf, trace, type Pt as TracePt } from './trace';
+import { bounds, pointCount, toDxf, trace, type Pt as TracePt } from './trace';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
@@ -143,13 +143,28 @@ function find(id: number | null): DesignPart | undefined {
 }
 
 /** The server's geometry for a part if it has it, otherwise the browser's own sketch. */
+/** The last result sorted by part, made once per result: a 5000-piece floor plan would otherwise scan
+ *  every preview layer for every part on every redraw. */
+type PartLines = ProcessResponse['preview'];
+interface ResultIndex { of: ProcessResponse | null; ids: number[]; preview: unknown; un: unknown; n: number; at: Map<number, number>; layers: PartLines[]; unassigned: NonNullable<ProcessResponse['unassigned']>[] }
+let byPart: ResultIndex | null = null;
+function resultIndex(): ResultIndex {
+  const n = (result?.preview.length ?? 0) + (result?.unassigned?.length ?? 0);
+  if (byPart && byPart.of === result && byPart.ids === resultIds && byPart.preview === result?.preview && byPart.un === result?.unassigned && byPart.n === n) return byPart;
+  const at = new Map(resultIds.map((id, i) => [id, i]));
+  const layers: PartLines[] = resultIds.map(() => []);
+  const unassigned: ResultIndex['unassigned'] = resultIds.map(() => []);
+  for (const l of result?.preview ?? []) layers[l.part]?.push(l);
+  for (const u of result?.unassigned ?? []) unassigned[u.part]?.push(u);
+  byPart = { of: result, ids: resultIds, preview: result?.preview, un: result?.unassigned, n, at, layers, unassigned };
+  return byPart;
+}
+
 function viewOf(p: DesignPart): PartView {
-  const i = resultIds.indexOf(p.id);
+  const ix = resultIndex();
+  const i = ix.at.get(p.id) ?? -1;
   const box = i >= 0 ? result?.partBoxes[i] : null;
-  if (result && box) {
-    const unassigned = (result.unassigned ?? []).filter((u) => u.part === i).flatMap((u) => u.paths);
-    return { id: p.id, box, layers: result.preview.filter((l) => l.part === i), unassigned };
-  }
+  if (result && box) return { id: p.id, box, layers: ix.layers[i], unassigned: ix.unassigned[i].flatMap((u) => u.paths) };
   return localView(p, renderSoon);
 }
 
@@ -250,6 +265,7 @@ function moveParts(ids: number[], dx: number, dy: number): void {
     p.yMm = round(p.yMm + dy);
     shiftResult(id, dx, dy); // exact, so the part never jumps back while the server works
   }
+  jobBoxNow();
   ws.clearLive();
   changed();
 }
@@ -342,7 +358,7 @@ function setScale(p: DesignPart, sx: number, sy: number): void {
 }
 
 function hasServerView(id: number): boolean {
-  const i = resultIds.indexOf(id);
+  const i = resultIndex().at.get(id) ?? -1;
   return i >= 0 && !!result?.partBoxes[i];
 }
 
@@ -416,6 +432,21 @@ $('save').onclick = async () => {
   if (ok) warn('Saved. Open it later with Open…, on this computer or another one.', '✓');
 };
 
+const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+
+/** One part's source has what drawing it needs. */
+function okSource(s: Record<string, unknown>): boolean {
+  const t = s.text as Record<string, unknown> | undefined;
+  const vb = s.vb as Record<string, unknown> | undefined;
+  switch (s.kind) {
+    case 'file': return typeof s.name === 'string' && typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf' || s.fileType === 'pbm');
+    case 'text': return !!t && typeof t.value === 'string' && typeof t.font === 'string' && num(t.heightMm) && typeof t.op === 'string';
+    case 'shape': return (s.shape === 'box' || s.shape === 'circle') && num(s.wMm) && num(s.hMm) && typeof s.op === 'string';
+    case 'path': return typeof s.d === 'string' && !!vb && [vb.x, vb.y, vb.w, vb.h].every(num) && num(s.wMm) && num(s.hMm) && typeof s.op === 'string';
+    default: return false;
+  }
+}
+
 /** A saved design, checked enough that a broken or odd file can't break the page (the server checks the rest). */
 function readDesign(text: string): { parts: DesignPart[]; materialId: string; colorMap: Record<string, ColorChoice>; powerChoice: Partial<Record<OpKind, number>> } | null {
   let d: unknown;
@@ -426,8 +457,7 @@ function readDesign(text: string): { parts: DesignPart[]; materialId: string; co
     const q = p as Record<string, unknown>;
     const s = q?.source as Record<string, unknown> | undefined;
     return !!q && typeof q.id === 'number' && [q.xMm, q.yMm, q.scale].every((v) => typeof v === 'number' && Number.isFinite(v))
-      && [0, 90, 180, 270].includes(q.rotateDeg as number) && !!s && ['file', 'text', 'shape', 'path'].includes(s.kind as string)
-      && (s.kind !== 'file' || (typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf' || s.fileType === 'pbm')));
+      && [0, 90, 180, 270].includes(q.rotateDeg as number) && !!s && okSource(s);
   };
   const ps = o.parts.filter(okPart).slice(0, MAX_PARTS);
   if (!ps.length) return null;
@@ -1212,24 +1242,25 @@ function renderLayers(): void {
 /** Recolour lines already on screen, before the server answers: `from` null means the grey unchosen lines. */
 function recolourNow(ids: number[], from: OpKind | null | 'all', to: ColorChoice): void {
   if (!result) return;
-  for (const id of ids) {
-    const i = resultIds.indexOf(id);
-    if (i < 0) continue;
-    const moved: [number, number][][] = [];
-    result.preview = result.preview.filter((l) => {
-      if (l.part !== i || (from !== 'all' && l.kind !== from)) return true;
-      moved.push(...l.paths);
+  const ix = resultIndex();
+  const moved = new Map<number, [number, number][][]>(); // part index -> its lines that change colour
+  for (const id of ids) { const i = ix.at.get(id); if (i !== undefined) moved.set(i, []); }
+  if (!moved.size) return;
+  result.preview = result.preview.filter((l) => {
+    const m = moved.get(l.part);
+    if (!m || (from !== 'all' && l.kind !== from)) return true;
+    m.push(...l.paths);
+    return false;
+  });
+  if (from === null || from === 'all') {
+    result.unassigned = (result.unassigned ?? []).filter((u) => {
+      const m = moved.get(u.part);
+      if (!m) return true;
+      m.push(...u.paths);
       return false;
     });
-    if (from === null || from === 'all') {
-      result.unassigned = (result.unassigned ?? []).filter((u) => {
-        if (u.part !== i) return true;
-        moved.push(...u.paths);
-        return false;
-      });
-    }
-    if (to !== 'ignore' && moved.length) result.preview.push({ kind: to, part: i, paths: moved });
   }
+  if (to !== 'ignore') for (const [i, paths] of moved) if (paths.length) result.preview.push({ kind: to, part: i, paths });
 }
 
 function toggleHidden(op: OpKind): void {
@@ -1623,11 +1654,12 @@ function mirrorSelected(axis: 'x' | 'y'): void {
 
 /** Mirror what is already on screen too, so the flip shows before the server answers. */
 function flipResult(id: number, axis: 'x' | 'y', dx: number, dy: number): void {
-  const i = resultIds.indexOf(id);
+  const ix = resultIndex();
+  const i = ix.at.get(id) ?? -1;
   const b = result?.partBoxes[i];
   if (!result || i < 0 || !b) return;
   const f = ([x, y]: [number, number]): [number, number] => axis === 'x' ? [b[0] + b[2] - x + dx, y + dy] : [x + dx, b[1] + b[3] - y + dy];
-  for (const l of [...result.preview, ...(result.unassigned ?? [])]) if (l.part === i) l.paths = l.paths.map((path) => path.map(f));
+  for (const l of [...ix.layers[i], ...ix.unassigned[i]]) l.paths = l.paths.map((path) => path.map(f));
   result.partBoxes[i] = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
 }
 
@@ -1671,6 +1703,7 @@ function alignSelected(how: AlignHow): void {
     p.yMm = round(p.yMm + dy);
     shiftResult(id, dx, dy);
   }
+  jobBoxNow();
   changed();
 }
 
@@ -1737,36 +1770,41 @@ function photoDialog(f: File): Promise<Source | null> {
     const url = URL.createObjectURL(f);
     img.onerror = () => { URL.revokeObjectURL(url); warn('That picture could not be opened. Try a PNG or JPG.'); resolve(null); };
     img.onload = () => {
-      let made: { data: string; preview: string; lines: number } | null = null;
+      let made: PhotoDots | null = null;
       let traced: TracePt[][] | null = null;
+      const greys = new Map<string, Float32Array>(); // the picture decoded once per size, not on every slider move
       const tracing = () => $<HTMLSelectElement>('phMode').value === 'trace';
       const redraw = () => {
         for (const el of document.querySelectorAll<HTMLElement>('.ph-trace')) el.hidden = !tracing();
         for (const el of document.querySelectorAll<HTMLElement>('.ph-dots')) el.hidden = tracing();
         $('phAdd').textContent = tracing() ? 'Add outlines' : 'Add photo';
-        if (tracing()) { traced = drawTrace(img); made = null; } else { made = drawPhoto(img); traced = null; }
+        if (tracing()) { traced = drawTrace(img, greys); made = null; } else { made = drawPhoto(img, greys); traced = null; }
       };
+      // A slider fires many times a frame; work once per frame with its latest value.
+      let raf = 0;
+      const redrawSoon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; redraw(); }); };
       const baseName = f.name.replace(/\.[^.]*$/, '');
       const tracedSvg = () => {
         const op = $<HTMLSelectElement>('phOp').value as OpKind;
-        const all = traced!.flat();
-        const box: [number, number, number, number] = [Math.min(...all.map((p) => p[0])), Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[0])), Math.max(...all.map((p) => p[1]))];
-        return pieceSvg({ lines: traced!.map((l) => ({ kind: op, pts: [...l, l[0]] })), box });
+        return pieceSvg({ lines: traced!.map((l) => ({ kind: op, pts: [...l, l[0]] })), box: bounds(traced!) });
       };
       $('phSvg').onclick = () => { if (traced?.length) void saveBlob(new Blob([tracedSvg()], { type: 'image/svg+xml' }), `${baseName}-trace.svg`, 'SVG drawing', '.svg'); };
       $('phDxf').onclick = () => { if (traced?.length) void saveBlob(new Blob([toDxf(traced)], { type: 'application/dxf' }), `${baseName}-trace.dxf`, 'DXF drawing', '.dxf'); };
       const form = $<HTMLFormElement>('photoForm');
       const done = (src: Source | null) => {
         $('photoDlg').hidden = true;
+        cancelAnimationFrame(raf);
+        raf = 0;
         form.oninput = null;
         form.onsubmit = null;
         $('phCancel').onclick = null;
         URL.revokeObjectURL(url);
         resolve(src);
       };
-      form.oninput = redraw;
+      form.oninput = (ev) => { if ((ev.target as HTMLElement).id !== 'phOp') redrawSoon(); }; // Use as only picks the colour
       form.onsubmit = (ev) => {
         ev.preventDefault();
+        if (raf) { cancelAnimationFrame(raf); raf = 0; redraw(); } // Add right after a slider move gets that move
         if (tracing()) {
           if (!traced?.length) return;
           done({ kind: 'file', name: `${baseName} (trace).svg`, fileType: 'svg', data: tracedSvg() });
@@ -1774,7 +1812,7 @@ function photoDialog(f: File): Promise<Source | null> {
         }
         if (!made) return;
         if (made.lines > MAX_PHOTO_LINES) return;
-        done({ kind: 'file', name: baseName + ' (photo)', fileType: 'pbm', data: made.data, preview: made.preview });
+        done({ kind: 'file', name: baseName + ' (photo)', fileType: 'pbm', data: made.data, preview: made.preview() });
       };
       $('phCancel').onclick = () => done(null);
       $<HTMLSelectElement>('phOp').value = color;
@@ -1790,18 +1828,22 @@ function photoDialog(f: File): Promise<Source | null> {
 const MAX_TRACE_POINTS = 40_000;
 
 function traceSize(loops: TracePt[][]): string {
-  const all = loops.flat();
-  const w = Math.max(...all.map((q) => q[0])) - Math.min(...all.map((q) => q[0]));
-  const h = Math.max(...all.map((q) => q[1])) - Math.min(...all.map((q) => q[1]));
-  return `${round(w, 1)} × ${round(h, 1)} mm`;
+  const [x0, y0, x1, y1] = bounds(loops);
+  return `${round(x1 - x0, 1)} × ${round(y1 - y0, 1)} mm`;
 }
 
-/** Image Trace: the picture in black and white, traced into outlines (mm). Draws them in the preview. */
-function drawTrace(img: HTMLImageElement): TracePt[][] {
-  const wMm = clamp(Number($<HTMLInputElement>('phW').value) || 60, 10, 400);
-  const hMm = Math.min(400, (wMm * img.naturalHeight) / Math.max(img.naturalWidth, 1));
-  const w = Math.min(900, Math.max(40, Math.round(Math.max(img.naturalWidth, 40)))); // trace detail, not print size
-  const h = Math.max(1, Math.round((w * hMm) / wMm));
+/** Width and height in mm, both inside `maxMm`, keeping the picture's shape (a tall picture gets narrower). */
+function pictureMm(img: HTMLImageElement, maxMm: number): [number, number] {
+  const aspect = img.naturalHeight / Math.max(img.naturalWidth, 1);
+  const wMm = Math.min(clamp(Number($<HTMLInputElement>('phW').value) || 60, 10, maxMm), maxMm / Math.max(aspect, 1e-6));
+  return [wMm, wMm * aspect];
+}
+
+/** The picture drawn at w x h on white (see-through parts of a PNG are paper, not black), as grey 0..255. */
+function pictureGrey(img: HTMLImageElement, w: number, h: number, cache: Map<string, Float32Array>): Float32Array {
+  const key = `${w}x${h}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -1812,6 +1854,17 @@ function drawTrace(img: HTMLImageElement): TracePt[][] {
   const px = g.getImageData(0, 0, w, h).data;
   const grey = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) grey[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+  cache.clear(); // one size at a time is plenty
+  cache.set(key, grey);
+  return grey;
+}
+
+/** Image Trace: the picture in black and white, traced into outlines (mm). Draws them in the preview. */
+function drawTrace(img: HTMLImageElement, greys: Map<string, Float32Array>): TracePt[][] {
+  const [wMm, hMm] = pictureMm(img, 400);
+  const w = Math.min(900, Math.max(40, Math.round(Math.max(img.naturalWidth, 40)))); // trace detail, not print size
+  const h = Math.max(1, Math.round((w * hMm) / wMm));
+  const grey = pictureGrey(img, w, h, greys);
   const look = { brightness: Number($<HTMLInputElement>('phB').value), contrast: Number($<HTMLInputElement>('phC').value), invert: $<HTMLInputElement>('phInv').checked, mode: 'threshold' as const };
   const cut = Number($<HTMLInputElement>('phT').value);
   const g2 = adjust(grey, look);
@@ -1854,43 +1907,37 @@ function drawTrace(img: HTMLImageElement): TracePt[][] {
   return loops;
 }
 
+/** preview: a picture of the dots, made only when the photo is added (a PNG of a big photo is slow to make). */
+interface PhotoDots { data: string; preview: () => string; lines: number }
+
 /** The picture at the chosen size and detail, as dots: draws the preview and returns the PBM. */
-function drawPhoto(img: HTMLImageElement): { data: string; preview: string; lines: number } {
-  const wMm = clamp(Number($<HTMLInputElement>('phW').value) || 60, 10, 200);
+function drawPhoto(img: HTMLImageElement, greys: Map<string, Float32Array>): PhotoDots {
   const mm = Number($<HTMLSelectElement>('phRes').value) || 0.2;
-  const hMm = Math.min(200, (wMm * img.naturalHeight) / Math.max(img.naturalWidth, 1));
+  const [wMm, hMm] = pictureMm(img, 200);
   const w = Math.max(1, Math.round(wMm / mm));
   const h = Math.max(1, Math.round(hMm / mm));
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const g = c.getContext('2d', { willReadFrequently: true })!;
-  g.fillStyle = '#fff'; // see-through parts of a PNG are paper, not black
-  g.fillRect(0, 0, w, h);
-  g.drawImage(img, 0, 0, w, h);
-  const px = g.getImageData(0, 0, w, h).data;
-  const grey = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) grey[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+  const grey = pictureGrey(img, w, h, greys);
   const dots = toDots(grey, w, h, {
     brightness: Number($<HTMLInputElement>('phB').value), contrast: Number($<HTMLInputElement>('phC').value),
     invert: $<HTMLInputElement>('phInv').checked, mode: $<HTMLSelectElement>('phMode').value === 'threshold' ? 'threshold' : 'dither',
   });
-  const out = g.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const v = dots[i] ? 30 : 255; // dark dots on light wood
-    out.data.set([v, v, v * (dots[i] ? 1 : 0.93), 255], i * 4);
-  }
-  g.putImageData(out, 0, 0);
   const prev = $<HTMLCanvasElement>('photoPrev');
   prev.width = w;
   prev.height = h;
-  prev.getContext('2d')!.putImageData(out, 0, 0);
+  const pg = prev.getContext('2d')!;
+  const out = pg.createImageData(w, h);
+  const o = out.data;
+  for (let i = 0, j = 0; i < w * h; i++, j += 4) { // dark dots on light wood
+    if (dots[i]) { o[j] = o[j + 1] = o[j + 2] = 30; } else { o[j] = o[j + 1] = 255; o[j + 2] = 237; }
+    o[j + 3] = 255;
+  }
+  pg.putImageData(out, 0, 0);
   const lines = runCount(dots, w, h);
   $('phInfo').textContent = lines > MAX_PHOTO_LINES
     ? `Too detailed (${lines.toLocaleString()} lines). Make it smaller, pick Fast, or use Black and white.`
     : `${Math.round(wMm)} × ${Math.round(hMm)} mm, ${lines.toLocaleString()} engrave lines. Engraves with your material's Engrave setting.`;
   $<HTMLButtonElement>('phAdd').disabled = lines > MAX_PHOTO_LINES;
-  return { data: toPbm(dots, w, h, mm), preview: c.toDataURL('image/png'), lines };
+  return { data: toPbm(dots, w, h, mm), preview: () => prev.toDataURL('image/png'), lines };
 }
 
 // ---------- box maker ----------
@@ -2119,18 +2166,25 @@ $('phraseBtn').onclick = askPhrase;
 
 $('gateLater').onclick = () => { $('gate').hidden = true; };
 
+/** Move one part's lines already on screen. Call jobBoxNow() after moving a batch. */
 function shiftResult(id: number, dx: number, dy: number): void {
-  const i = resultIds.indexOf(id);
+  const ix = resultIndex();
+  const i = ix.at.get(id) ?? -1;
   if (!result || i < 0) return;
   const b = result.partBoxes[i];
   if (b) result.partBoxes[i] = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
-  for (const l of [...result.preview, ...(result.unassigned ?? [])]) {
-    if (l.part === i) l.paths = l.paths.map((path) => path.map(([x, y]) => [x + dx, y + dy] as [number, number]));
+  for (const l of [...ix.layers[i], ...ix.unassigned[i]]) l.paths = l.paths.map((path) => path.map(([x, y]) => [x + dx, y + dy] as [number, number]));
+}
+
+/** The whole job's box from the parts' boxes (once per batch: moving 5000 pieces one by one was slow). */
+function jobBoxNow(): void {
+  if (!result) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of result.partBoxes) {
+    if (!b) continue;
+    x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]);
   }
-  const boxes = result.partBoxes.filter((x): x is Box => !!x);
-  result.bboxMm = boxes.length
-    ? [Math.min(...boxes.map((x) => x[0])), Math.min(...boxes.map((x) => x[1])), Math.max(...boxes.map((x) => x[2])), Math.max(...boxes.map((x) => x[3]))]
-    : null;
+  result.bboxMm = x0 <= x1 ? [x0, y0, x1, y1] : null;
 }
 
 // ---------- rendering ----------
@@ -2382,6 +2436,7 @@ document.addEventListener('keydown', (e) => {
       p.yMm = round(p.yMm + d[1]);
       shiftResult(id, d[0], d[1]);
     }
+    jobBoxNow();
     changed({ merge: `nudge${ids.join(',')}` });
   }
 });
@@ -2424,13 +2479,25 @@ function defaultHint(): void {
 
 // ---------- saving the design on this Chromebook ----------
 
+let saveTimer = 0;
+/** Kept on this Chromebook a moment after the last change (a big design is slow to write), and at once
+ *  when the tab is closed or hidden. */
 function save(): void {
+  clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(saveNow, 500);
+}
+
+function saveNow(): void {
+  clearTimeout(saveTimer);
+  saveTimer = 0;
   try {
     localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, materialId, color, locked, unit, material }));
   } catch {
     /* too big for storage: the design still works, it just won't survive a reload */
   }
 }
+window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) saveNow(); });
 
 function restore(): void {
   try {

@@ -19,47 +19,50 @@ export interface TraceOptions {
 
 /** Closed loops (first point not repeated), in pixel units. */
 export function traceLoops(ink: Uint8Array, w: number, h: number): Pt[][] {
-  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? ink[y * w + x] : 0);
   const W = w + 1;
-  const out = new Map<number, number[]>(); // corner → corners its edges go to
-  const add = (x0: number, y0: number, x1: number, y1: number) => {
-    const k = y0 * W + x0;
-    const list = out.get(k);
-    const to = y1 * W + x1;
-    if (list) list.push(to);
-    else out.set(k, [to]);
-  };
+  // Each pixel corner has at most two edges leaving it (two, only where blobs touch at a corner).
+  // Typed arrays, not a Map of lists: a busy 900 px photo has over a million edges.
+  const n0 = new Int32Array(W * (h + 1)).fill(-1);
+  const n1 = new Int32Array(W * (h + 1)).fill(-1);
+  const add = (from: number, to: number) => { if (n0[from] < 0) n0[from] = to; else n1[from] = to; };
   for (let y = 0; y < h; y++) {
+    const row = y * w;
     for (let x = 0; x < w; x++) {
-      if (!ink[y * w + x]) continue;
-      if (!at(x, y - 1)) add(x, y, x + 1, y); // top, going right
-      if (!at(x + 1, y)) add(x + 1, y, x + 1, y + 1); // right, going down
-      if (!at(x, y + 1)) add(x + 1, y + 1, x, y + 1); // bottom, going left
-      if (!at(x - 1, y)) add(x, y + 1, x, y); // left, going up
+      if (!ink[row + x]) continue;
+      const c = y * W + x; // this pixel's top-left corner
+      if (y === 0 || !ink[row - w + x]) add(c, c + 1); // top, going right
+      if (x === w - 1 || !ink[row + x + 1]) add(c + 1, c + 1 + W); // right, going down
+      if (y === h - 1 || !ink[row + w + x]) add(c + 1 + W, c + W); // bottom, going left
+      if (x === 0 || !ink[row + x - 1]) add(c + W, c); // left, going up
     }
   }
+  /** Take one edge leaving `k`: the only one, or (where blobs touch) the right turn coming from `prev`. */
+  const take = (k: number, prev: number): number => {
+    let useSecond = n1[k] >= 0;
+    if (useSecond && prev >= 0) {
+      const px = (k % W) - (prev % W);
+      const py = Math.floor(k / W) - Math.floor(prev / W);
+      const nx = (n0[k] % W) - (k % W);
+      const ny = Math.floor(n0[k] / W) - Math.floor(k / W);
+      useSecond = !(px * ny - py * nx > 0); // right turn on screen (y down) keeps touching blobs apart
+    }
+    if (useSecond) { const t = n1[k]; n1[k] = -1; return t; }
+    const t = n0[k];
+    n0[k] = n1[k];
+    n1[k] = -1;
+    return t;
+  };
   const loops: Pt[][] = [];
-  for (const [start, list] of out) {
-    while (list.length) {
-      const loop: Pt[] = [];
+  for (let start = 0; start < n0.length; start++) {
+    while (n0[start] >= 0) {
+      const loop: Pt[] = [[start % W, Math.floor(start / W)]];
       let prev = start;
-      let cur = list.pop()!;
-      loop.push([start % W, Math.floor(start / W)]);
+      let cur = take(start, -1);
       while (cur !== start) {
         loop.push([cur % W, Math.floor(cur / W)]);
-        const next = out.get(cur)!;
-        // where two blobs touch at a corner, turn right: that keeps them apart
-        let pick = 0;
-        if (next.length > 1) {
-          const [px, py] = [cur % W - prev % W, Math.floor(cur / W) - Math.floor(prev / W)];
-          pick = next.findIndex((n) => {
-            const [nx, ny] = [n % W - cur % W, Math.floor(n / W) - Math.floor(cur / W)];
-            return px * ny - py * nx > 0; // right turn on screen (y down)
-          });
-          if (pick < 0) pick = 0;
-        }
+        const next = take(cur, prev);
         prev = cur;
-        cur = next.splice(pick, 1)[0];
+        cur = next;
       }
       loops.push(dropStraight(loop));
     }
@@ -91,16 +94,25 @@ function segDist(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
 }
 
+/** Douglas-Peucker without recursion, so a long outline can't run out of stack. */
 function dp(pts: Pt[], tol: number): Pt[] {
-  if (pts.length < 3) return pts;
-  let worst = 0;
-  let at = 0;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const d = segDist(pts[i], pts[0], pts[pts.length - 1]);
-    if (d > worst) { worst = d; at = i; }
+  const n = pts.length;
+  if (n < 3) return pts;
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  const stack = [0, n - 1];
+  while (stack.length) {
+    const b = stack.pop()!;
+    const a = stack.pop()!;
+    let worst = 0;
+    let at = 0;
+    for (let i = a + 1; i < b; i++) {
+      const d = segDist(pts[i], pts[a], pts[b]);
+      if (d > worst) { worst = d; at = i; }
+    }
+    if (worst > tol) { keep[at] = 1; stack.push(a, at, at, b); }
   }
-  if (worst <= tol) return [pts[0], pts[pts.length - 1]];
-  return [...dp(pts.slice(0, at + 1), tol).slice(0, -1), ...dp(pts.slice(at), tol)];
+  return pts.filter((_, i) => keep[i]);
 }
 
 /** Douglas-Peucker on a closed loop: split at the point farthest from the first. */
@@ -154,9 +166,21 @@ export function pointCount(loops: Pt[][]): number {
   return loops.reduce((n, l) => n + l.length, 0);
 }
 
+/** [x0, y0, x1, y1] round every point. A loop, not Math.min(...all): a big trace has too many points to spread. */
+export function bounds(loops: Pt[][]): [number, number, number, number] {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const l of loops) for (const [x, y] of l) {
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return x0 <= x1 ? [x0, y0, x1, y1] : [0, 0, 0, 0];
+}
+
 /** An R12 DXF (millimetres) with one closed POLYLINE per loop, y up like CAD. Opens in AutoCAD. */
 export function toDxf(loops: Pt[][], layer = 'TRACE'): string {
-  const maxY = Math.max(0, ...loops.flatMap((l) => l.map((p) => p[1])));
+  const maxY = Math.max(0, bounds(loops)[3]);
   const r = (v: number) => (Math.round(v * 1000) / 1000).toString();
   const out: string[] = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES'];
   for (const l of loops) {

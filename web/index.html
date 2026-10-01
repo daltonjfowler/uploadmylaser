@@ -56,8 +56,8 @@
       <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
       <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
     </div>
-    <input type="file" id="openFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
-    <input type="file" id="importFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
+    <input type="file" id="openFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden>
+    <input type="file" id="importFile" accept=".svg,.dxf,.uml,image/svg+xml,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden>
     <input type="file" id="pictureFile" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden>
   </nav>
 
@@ -249,7 +249,7 @@
       <p class="muted small"><b>Dots</b> engrave a photo (beta: try a small one first). <b>Trace</b> turns a logo or drawing into outlines you can cut, mark or engrave, or download as SVG or DXF.</p>
       <canvas id="photoPrev" class="photoprev" aria-label="How the photo will engrave"></canvas>
       <div class="row">
-        <label>Width <input id="phW" type="number" min="10" max="200" step="any" value="60"> mm</label>
+        <label>Width <input id="phW" type="number" min="10" max="400" step="any" value="60"> mm</label>
         <label class="ph-dots">Detail <select id="phRes"><option value="0.3">Fast</option><option value="0.2" selected>Normal</option><option value="0.15">Fine</option></select></label>
         <label>Style <select id="phMode"><option value="dither" selected>Dots (photos)</option><option value="threshold">Black and white (logos)</option><option value="trace">Trace to outlines (like Image Trace)</option></select></label>
       </div>
