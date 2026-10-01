@@ -1390,6 +1390,9 @@ for (const btn of document.querySelectorAll<HTMLElement>('.menubtn')) {
   // with one menu open, pointing at the next one opens it, like a desktop menu bar
   btn.addEventListener('pointerenter', () => { if (openMenuName && openMenuName !== btn.dataset.menu) { closeMenu(); openBarMenu(btn); } });
 }
+// Our menu opens on right mouse DOWN; Windows Chrome fires its own menu on mouse UP, by which
+// time the pointer is over #ctxmenu, so block the browser menu there too.
+$('ctxmenu').addEventListener('contextmenu', (e) => e.preventDefault());
 $('ctxmenu').addEventListener('keydown', (e) => {
   const items = [...$('ctxmenu').querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
   const i = items.indexOf(document.activeElement as HTMLButtonElement);
