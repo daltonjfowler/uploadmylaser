@@ -55,6 +55,15 @@ function say(text: string, tone: 'plain' | 'ok' | 'error' = 'plain'): void {
 
 // ---------- key ----------
 
+let offered = false;
+/** Once a key works, ask the browser's password manager to keep it (Chrome and Edge show "Save password?"). */
+function offerToSaveKey(): void {
+  const PC = (window as unknown as { PasswordCredential?: new (d: { id: string; password: string; name: string }) => Credential }).PasswordCredential;
+  if (offered || !PC || !navigator.credentials?.store) return;
+  offered = true;
+  navigator.credentials.store(new PC({ id: 'teacher', password: key(), name: 'Teacher key' })).catch(() => { /* declined or not allowed */ });
+}
+
 function loadKey(): string {
   try { return localStorage.getItem(KEY_STORAGE) ?? ''; } catch { return ''; }
 }
@@ -120,6 +129,7 @@ async function refresh(okText = 'Up to date.'): Promise<boolean> {
   try {
     show(await api<PhraseState>('/api/teacher/phrase'));
     say(okText, 'ok');
+    offerToSaveKey();
     if ($('panel').hidden) await loadSettings();
     return true;
   } catch (e) {
@@ -196,7 +206,7 @@ $('warmup').onclick = async () => {
 };
 
 phraseInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('set').click(); });
-keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('refresh').click(); });
+$('keyForm').addEventListener('submit', (e) => { e.preventDefault(); void refresh(); });
 
 async function loadSettings(): Promise<void> {
   const cfg = await api<{ materials: Material[]; machine: MachineConfig }>('/api/teacher/config');

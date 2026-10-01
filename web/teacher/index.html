@@ -20,14 +20,17 @@
   <p class="sub">Set the class phrase. Students type it once per tab; nobody can check a design or send it to the laser without it.</p>
 
   <h2 class="cap">Teacher key</h2>
-  <div class="trow">
+  <form id="keyForm" class="trow">
+    <!-- a fixed user name, so the browser's password manager can save and fill the key -->
+    <input type="text" name="username" autocomplete="username" value="teacher" hidden>
     <div>
       <label for="key" class="block">Kept in this browser only</label>
-      <input id="key" type="password" autocomplete="off" placeholder="teacher key">
+      <input id="key" name="password" type="password" autocomplete="current-password" placeholder="teacher key">
     </div>
+    <div class="fixed"><button type="submit">Open</button></div>
     <div class="fixed"><button id="remember" type="button">Remember on this machine</button></div>
     <div class="fixed"><button id="forget" type="button" class="linkbtn">Forget key on this device</button></div>
-  </div>
+  </form>
 
   <h2 class="cap">Today's phrase</h2>
   <div class="trow">
