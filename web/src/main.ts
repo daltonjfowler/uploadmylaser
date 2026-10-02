@@ -651,14 +651,15 @@ function ungroup(): void {
   const p = find(selected);
   if (!p || p.source.kind !== 'file') return;
   const i = resultIds.indexOf(p.id);
-  const say = (t: string) => { notes = [t]; render(); };
+  // a pop-up, not a note: under a red bed error the note was easy to miss and Ungroup looked broken
+  const say = (t: string) => { warn(t); render(); };
   if (pending || !result || i < 0) return say('Wait a moment for the file to be checked, then press Ungroup again.');
   if (result.unassigned?.some((u) => u.part === i)) return say('Choose what each colour does first (under Layers), then press Ungroup.');
   const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
   if (!lines.length) return say('Nothing in this file to ungroup.');
   const pieces = splitPieces(lines);
   if (pieces.length < 2) return say('This file is already one piece.');
-  if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`This file has ${pieces.length} pieces, and one design can have ${MAX_PARTS} parts. Remove some parts first, or split it in AutoCAD.`);
+  if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`Cannot ungroup: this file splits into ${pieces.length} pieces, and one design can hold ${MAX_PARTS} parts. Delete other parts first, or split it in AutoCAD or LightBurn.`);
   const name = p.source.name.replace(/\.(dxf|svg)$/i, '');
   const made: DesignPart[] = pieces.map((pc, k) => ({
     id: nextId++,
