@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .dwg import DwgRequest, DwgResponse, convert
 from .models import ContainerJob, ProcessResponse
 from .testcard import CardRequest, CardResponse, build_test_card
 from .runner import get_runner
@@ -29,6 +30,12 @@ def health() -> dict[str, bool]:
 def process_route(job: ContainerJob) -> ProcessResponse:
     # sync def → FastAPI runs it in a threadpool while a worker process does the geometry (app/runner.py)
     return get_runner().run(job)
+
+
+@app.post("/convert-dwg", response_model=DwgResponse, response_model_by_alias=True, response_model_exclude_none=True)
+def convert_dwg_route(req: DwgRequest) -> DwgResponse:
+    # LibreDWG's dwg2dxf in a subprocess with a time limit, one at a time (app/dwg.py)
+    return convert(req)
 
 
 @app.post("/testcard", response_model=CardResponse, response_model_by_alias=True)

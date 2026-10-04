@@ -630,3 +630,12 @@ https://dejavu-fonts.github.io/License.html
 ==============================================================================
 The processing container also uses FastAPI, Pydantic, svgelements, ezdxf, fontTools (MIT),
 Uvicorn and Shapely (BSD-3-Clause) on the server. See CREDITS.md in the repository.
+
+
+==============================================================================
+LibreDWG 0.14 (dwg2dxf), GNU General Public License v3.0 or later
+https://www.gnu.org/software/libredwg/ . Copyright (C) Free Software Foundation, Inc.
+
+Used on the server to turn DWG files into DXF (beta). It runs as a separate program; the site's own
+code stays MIT. The unmodified source it is built from: https://ftp.gnu.org/gnu/libredwg/libredwg-0.14.tar.xz
+Licence text: https://www.gnu.org/licenses/gpl-3.0.txt

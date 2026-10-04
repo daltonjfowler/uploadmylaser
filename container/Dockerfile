@@ -1,5 +1,22 @@
 # Pinned by digest (the multi-arch index of python:3.12-slim on 2026-09-27), so a rebuild can't pick up a
 # different base. To update: docker pull python:3.12-slim, then docker inspect --format '{{.RepoDigests}}'.
+
+# --- DWG -> DXF (beta): LibreDWG's dwg2dxf, built from the GNU release, pinned by sha256 ---------------
+# GPL-3.0, run as a separate program by app/dwg.py (CREDITS.md). Only the one static binary is kept.
+# To update: change the version and the hash together (sha256sum of the .tar.xz from ftp.gnu.org).
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS dwg
+ARG LIBREDWG=0.14
+ARG LIBREDWG_SHA256=62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config xz-utils \
+ && rm -rf /var/lib/apt/lists/*
+ADD https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG}.tar.xz /tmp/
+RUN cd /tmp && echo "${LIBREDWG_SHA256}  libredwg-${LIBREDWG}.tar.xz" | sha256sum -c - \
+ && tar xf libredwg-${LIBREDWG}.tar.xz && cd libredwg-${LIBREDWG} \
+ && ./configure --disable-shared --enable-static --disable-bindings --disable-docs --disable-python >/dev/null \
+ && make -j"$(nproc)" -C src >/dev/null && make -j"$(nproc)" -C programs dwg2dxf >/dev/null \
+ && strip programs/dwg2dxf && cp programs/dwg2dxf /usr/local/bin/dwg2dxf && dwg2dxf --version
+
+# --- the processor ----------------------------------------------------------------------------------
 FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 
 # Fonts for the Text tool (ids in app/geometry/text_import.py and shared/contracts.ts TEXT_FONTS).
@@ -29,6 +46,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes --only-binary=:all: -r requirements.txt
 
 COPY app ./app
+COPY --from=dwg /usr/local/bin/dwg2dxf /usr/local/bin/dwg2dxf
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8080

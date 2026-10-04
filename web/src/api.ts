@@ -27,6 +27,20 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** DWG -> DXF on the processor (beta: LibreDWG). Resolves to the DXF's bytes, or throws ApiError with a sentence. */
+export async function convertDwg(dwg: Uint8Array): Promise<Uint8Array> {
+  const r = await call<{ dxfB64?: string; error?: string }>('/api/convert-dwg', {
+    method: 'POST',
+    body: dwg as BodyInit,
+    headers: { 'content-type': 'application/octet-stream', 'x-class-phrase': getPhrase(), 'x-client-id': clientId(), 'x-device-id': deviceId() },
+  });
+  if (!r.dxfB64) throw new ApiError(422, r.error ?? 'That DWG could not be converted. In AutoCAD, use Save As and pick a DXF instead.');
+  const bin = atob(r.dxfB64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 /** Cached so the page still opens (and STOP still works) if the network drops. */
 async function cached<T>(key: string, path: string): Promise<T> {
   try {

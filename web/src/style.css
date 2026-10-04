@@ -113,6 +113,8 @@ body.app { height: 100vh; display: grid; grid-template-rows: auto auto auto minm
 .colorrow button.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: color-mix(in srgb, var(--accent) 14%, var(--btn)); }
 .colorrow.ask { padding: 6px; border: 1px solid var(--warn, #d97706); border-radius: 6px; background: color-mix(in srgb, var(--warn, #d97706) 10%, transparent); }
 .colorrow .askline { flex-basis: 100%; }
+.colorrow.merge { padding: 6px; border: 1px dashed var(--accent); border-radius: 6px; font-weight: 600; }
+.colorrow.merge .swatch { background: conic-gradient(#16a34a, #eab308, #f97316, #a855f7, #16a34a); }
 .unitslist { display: grid; gap: 4px; margin: 8px 0; }
 .unitslist label { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
 .unitslist label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }

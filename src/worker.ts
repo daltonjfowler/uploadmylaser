@@ -120,6 +120,7 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true });
   }
   if (p === '/api/process' && m === 'POST') return processDesign(req, env);
+  if (p === '/api/convert-dwg' && m === 'POST') return convertDwg(req, env);
 
   // Everything under /api/teacher/ needs the key, even paths that do not exist.
   if (p.startsWith('/api/teacher/')) {
@@ -172,20 +173,7 @@ async function processDesign(req: Request, env: Env): Promise<Response> {
   const tooBig = `Your files are too big together (${MAX_UPLOAD_BYTES / 1024 / 1024} MB max).`;
   const declared = Number(req.headers.get('content-length') ?? 0);
   if (Number.isFinite(declared) && declared > MAX_PROCESS_BODY_BYTES) throw new HttpError(413, tooBig);
-  checkCidr(req, env);
-  await checkIpLimit(env.PROCESS_IP_LIMIT, req.headers.get('cf-connecting-ip') ?? '');
-  await checkPhrase(req, env);
-
-  const verdict = await countersStub(env).checkProcessRate(
-    rateLimitKey(req.headers.get('x-client-id'), req.headers.get('cf-connecting-ip') ?? ''),
-  );
-  if (!verdict.allowed) {
-    const s = verdict.retryAfterSeconds;
-    const msg = verdict.scope === 'client'
-      ? `You are changing your design very fast. Wait ${s} seconds and it will catch up.`
-      : `The laser processor is very busy right now. Wait ${s} seconds and try again.`;
-    throw new HttpError(429, msg, { 'retry-after': String(s) });
-  }
+  await processGates(req, env);
 
   let form: FormData;
   try {
@@ -224,6 +212,47 @@ async function processDesign(req: Request, env: Env): Promise<Response> {
   if (r.status === 422) throw new HttpError(400, 'The laser processor could not read that design. Reload the page and try again.');
   if (r.status === 503) throw new HttpError(503, BUSY);
   if (r.status !== 200) throw new HttpError(502, 'The laser processor had a problem. Try again in a moment.');
+  return new Response(r.text, { headers: { 'content-type': 'application/json' } });
+}
+
+/** What every call that wakes the processor must pass: school lock, per-IP limit, class phrase, pace. */
+async function processGates(req: Request, env: Env): Promise<void> {
+  checkCidr(req, env);
+  await checkIpLimit(env.PROCESS_IP_LIMIT, req.headers.get('cf-connecting-ip') ?? '');
+  await checkPhrase(req, env);
+
+  const verdict = await countersStub(env).checkProcessRate(
+    rateLimitKey(req.headers.get('x-client-id'), req.headers.get('cf-connecting-ip') ?? ''),
+  );
+  if (!verdict.allowed) {
+    const s = verdict.retryAfterSeconds;
+    const msg = verdict.scope === 'client'
+      ? `You are changing your design very fast. Wait ${s} seconds and it will catch up.`
+      : `The laser processor is very busy right now. Wait ${s} seconds and try again.`;
+    throw new HttpError(429, msg, { 'retry-after': String(s) });
+  }
+}
+
+// ---------- DWG -> DXF (beta, LibreDWG in the container: container/app/dwg.py) ----------
+
+async function convertDwg(req: Request, env: Env): Promise<Response> {
+  const tooBig = `That DWG is bigger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB. In AutoCAD, use Save As and pick a DXF instead.`;
+  const declared = Number(req.headers.get('content-length') ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) throw new HttpError(413, tooBig);
+  await processGates(req, env);
+  const bytes = new Uint8Array(await req.arrayBuffer());
+  if (bytes.length > MAX_UPLOAD_BYTES) throw new HttpError(413, tooBig);
+  if (!bytes.length) throw new HttpError(400, 'That DWG is empty.');
+  let r: { status: number; text: string };
+  try {
+    r = await callContainer(env, '/convert-dwg', JSON.stringify({ dwgB64: toBase64(bytes) }));
+  } catch (e) {
+    const timedOut = e instanceof ContainerTimeout;
+    console.error(JSON.stringify({ message: timedOut ? 'dwg convert timeout' : 'container unreachable', error: String(e) }));
+    throw new HttpError(503, timedOut ? 'That DWG took too long to convert. In AutoCAD, use Save As and pick a DXF instead.' : BUSY);
+  }
+  if (r.status === 503) throw new HttpError(503, BUSY);
+  if (r.status !== 200) throw new HttpError(502, 'The laser processor could not convert that DWG. In AutoCAD, use Save As and pick a DXF instead.');
   return new Response(r.text, { headers: { 'content-type': 'application/json' } });
 }
 

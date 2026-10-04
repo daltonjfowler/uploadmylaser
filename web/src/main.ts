@@ -10,7 +10,7 @@ import type {
   ColorChoice, DxfUnits, OpKind, Part, PartExtras, Placement, ProcessRequest, ProcessResponse, PublicMaterial, TextFontId, TextSpec,
 } from '../../shared/contracts';
 import { DXF_UNITS, MAX_PARTS, MAX_UPLOAD_BYTES, TEXT_FONTS } from '../../shared/contracts';
-import { ApiError, checkPhrase, getMachine, getMaterials, getPhrase, processDesign, setPhrase, type PublicMachine } from './api';
+import { ApiError, checkPhrase, convertDwg, getMachine, getMaterials, getPhrase, processDesign, setPhrase, type PublicMachine } from './api';
 import { OP_COLORS, OP_LABELS, RUN_ORDER } from './ops';
 import { cleanPanelName } from './ruida/panel';
 import { fromBase64 } from './ruida/swizzle';
@@ -422,24 +422,47 @@ async function readFile(f: File): Promise<Source | null> {
     return null;
   }
   const name = f.name.toLowerCase();
-  if (!name.endsWith('.svg') && !name.endsWith('.dxf')) {
-    notes = ['Pick an SVG or DXF file.'];
+  if (!name.endsWith('.svg') && !name.endsWith('.dxf') && !name.endsWith('.dwg')) {
+    notes = ['Pick an SVG, DXF or DWG file.'];
     render();
     return null;
   }
   if (name.endsWith('.svg')) return { kind: 'file', name: f.name, fileType: 'svg', data: await f.text() };
-  const bytes = new Uint8Array(await f.arrayBuffer());
-  const flavour = dxfFlavour(String.fromCharCode(...bytes.subarray(0, 32)));
+  let bytes: Uint8Array = new Uint8Array(await f.arrayBuffer());
+  let flavour = dxfFlavour(String.fromCharCode(...bytes.subarray(0, 32)));
+  let fileName = f.name;
   if (flavour === 'dwg') {
-    notes = ['That file is a DWG, not a DXF. In AutoCAD, use Save As and pick "AutoCAD 2013 DXF" (or any DXF), then open that file.'];
-    render();
-    return null;
+    const dxf = await dwgToDxf(bytes, used);
+    if (!dxf) return null;
+    bytes = dxf;
+    flavour = dxfFlavour(String.fromCharCode(...bytes.subarray(0, 32)));
+    fileName = f.name.replace(/\.(dwg|dxf)$/i, '') + '.dxf';
   }
   // A binary DXF is kept one char per byte and sent as the same bytes (see buildRequest).
   const data = flavour === 'binary' ? bytesToBinaryString(bytes) : new TextDecoder().decode(bytes);
-  const units = await askUnits(f.name, flavour === 'ascii' ? data : null);
+  const units = await askUnits(fileName, flavour === 'ascii' ? data : null);
   if (units === null) return null; // cancelled
-  return { kind: 'file', name: f.name, fileType: 'dxf', data, units };
+  if (fileName !== f.name) warn('Converted from DWG (beta). Check every line before you cut. If something is missing, use Save As DXF in AutoCAD.');
+  return { kind: 'file', name: fileName, fileType: 'dxf', data, units };
+}
+
+/** DWG -> DXF on the processor (beta, LibreDWG). Null after telling the student why it did not work. */
+async function dwgToDxf(dwg: Uint8Array, used: number): Promise<Uint8Array | null> {
+  const say = (t: string) => { warn(t); render(); return null; };
+  if (!getPhrase()) return say('Opening a DWG needs the class phrase (top right). Or, in AutoCAD, use Save As and pick "AutoCAD 2013 DXF".');
+  $('busy').hidden = false;
+  $('busy').lastChild!.textContent = 'Converting the DWG (beta)…';
+  try {
+    const dxf = await convertDwg(dwg);
+    if (dxf.length + used > MAX_UPLOAD_BYTES) return say('That DWG is too big once converted (10 MB max for the whole design). Save As DXF in AutoCAD and simplify it.');
+    return dxf;
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403)) setPhrase('');
+    return say((e as Error).message);
+  } finally {
+    $('busy').lastChild!.textContent = 'Updating the laser lines…';
+    $('busy').hidden = !pending;
+  }
 }
 
 // ---------- DXF units: "I drew in ..." (Dalton: AutoCAD files often say the wrong units, or none) ----------
@@ -1689,32 +1712,45 @@ function renderColors(): void {
     return div;
   };
 
+  /** Every colour key in `keys`, in every file, now does `choice`. */
+  const pick = (keys: Set<string>, choice: ColorChoice) => {
+    const byWas = new Map<OpKind | null, number[]>(); // instant recolour, one pass per old colour
+    for (const p of files) {
+      const all = fileColors(p);
+      const mine = all.filter((c) => keys.has(c.key));
+      if (!mine.length) continue;
+      const was = new Set(mine.map((c) => colorNow(p.source, c.key, c.kind)));
+      const others = all.filter((c) => !keys.has(c.key)).map((c) => colorNow(p.source, c.key, c.kind));
+      p.source.colors = { ...p.source.colors, ...Object.fromEntries(mine.map((c) => [c.key, choice])) };
+      const w = [...was][0];
+      if (was.size === 1 && w !== 'ignore' && !others.includes(w)) {
+        let ids = byWas.get(w);
+        if (!ids) byWas.set(w, ids = []);
+        ids.push(p.id);
+      }
+    }
+    for (const [w, ids] of byWas) recolourNow(ids, w, choice);
+    changed();
+  };
+
   const order = (g: Group) => (unsure(g) ? -1 : RUN_ORDER.indexOf([...g.kinds][0] as OpKind));
   const out: HTMLElement[] = [];
+  // Many odd colours (a CAD file with a colour per layer): one row merges them all into one of the three.
+  const odd = [...groups].filter(([id, g]) => id !== 'photo:dots' && g.kinds.has(null));
+  if (odd.length >= 2) {
+    const keys = new Set(odd.flatMap(([, g]) => [...g.keys]));
+    const nows = new Set(odd.flatMap(([, g]) => [...g.now]));
+    const merge = row(`All ${odd.length} other colours`, null, nows.size === 1 ? [...nows][0] : null, false, false, (choice) => pick(keys, choice));
+    merge.classList.add('merge');
+    merge.dataset.hint = 'Black, red and blue already know their jobs. This sets every other colour at once; you can still change one below.';
+    out.push(merge);
+  }
   for (const [id, g] of [...groups].sort((a, b) => order(a[1]) - order(b[1]))) {
     const photo = id === 'photo:dots';
     const hex = id.startsWith('#') ? id : null;
     const label = photo ? 'Photo' : hex ? (g.kinds.has(null) ? `${colourName(hex)} ${hex}` : colourName(hex)) : id;
     const now = g.now.size === 1 ? [...g.now][0] : null; // mixed choices: none lit until one is picked
-    out.push(row(label, hex, now, unsure(g), photo, (choice) => {
-      const byWas = new Map<OpKind | null, number[]>(); // instant recolour, one pass per old colour
-      for (const p of files) {
-        const all = fileColors(p);
-        const mine = all.filter((c) => g.keys.has(c.key));
-        if (!mine.length) continue;
-        const was = new Set(mine.map((c) => colorNow(p.source, c.key, c.kind)));
-        const others = all.filter((c) => !g.keys.has(c.key)).map((c) => colorNow(p.source, c.key, c.kind));
-        p.source.colors = { ...p.source.colors, ...Object.fromEntries(mine.map((c) => [c.key, choice])) };
-        const w = [...was][0];
-        if (was.size === 1 && w !== 'ignore' && !others.includes(w)) {
-          let ids = byWas.get(w);
-          if (!ids) byWas.set(w, ids = []);
-          ids.push(p.id);
-        }
-      }
-      for (const [w, ids] of byWas) recolourNow(ids, w, choice);
-      changed();
-    }));
+    out.push(row(label, hex, now, unsure(g), photo, (choice) => pick(g.keys, choice)));
   }
   for (const key of oldUnknown) out.push(row(key, null, colorMap[key] ?? null, true, false, (choice) => { colorMap[key] = choice; changed(); }));
   $('colorList').replaceChildren(...out);

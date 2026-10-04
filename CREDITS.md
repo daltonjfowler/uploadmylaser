@@ -31,6 +31,7 @@ only: no code from them is copied here.
 | [Pydantic](https://github.com/pydantic/pydantic) | 2.13 | MIT | the request/response contracts |
 | [svgelements](https://github.com/meerk40t/svgelements) | 1.9 | MIT | SVG parsing: transforms, units, CSS colours |
 | [ezdxf](https://github.com/mozman/ezdxf) | 1.4 | MIT | DXF parsing |
+| [LibreDWG](https://www.gnu.org/software/libredwg/) `dwg2dxf` | 0.14 | GPL-3.0-or-later | DWG to DXF (beta). Built from the GNU release in `container/Dockerfile` and run as a separate program by `app/dwg.py`; its source is at <https://ftp.gnu.org/gnu/libredwg/> |
 | [Shapely](https://github.com/shapely/shapely) | 2.1 | BSD-3-Clause | engrave fill hatching with holes |
 | [fontTools](https://github.com/fonttools/fonttools) | 4.66 | MIT | text to outlines |
 | [Python](https://www.python.org) 3.12 (`python:3.12-slim` image) | | PSF | the runtime |
