@@ -7,10 +7,11 @@ import { LINE_GAP } from './sketch';
 import { smoothD } from './library';
 import { isDark, onThemeChange } from './theme';
 
-// The bed stays a light "material" colour in dark mode too, so black Cut through lines stay visible.
+// The bed stays a light "material" colour in dark mode too, so black Cut through lines stay visible; around
+// it is mid grey, not black, so parts dragged off the bed still show (Dalton, 2026-10-04).
 const THEMES = {
   light: { around: '#e3e6ea', bed: '#fdfbf6', grid: '#efe8d8', grid10: '#d9cfb6', edge: '#9ca3af', ruler: '#f3f4f6', rulerInk: '#5b6570', corner: '#f3f4f6' },
-  dark: { around: '#0d1117', bed: '#d8d1c1', grid: '#cbc3b1', grid10: '#b3a98f', edge: '#6b7280', ruler: '#161b22', rulerInk: '#9198a1', corner: '#161b22' },
+  dark: { around: '#767e8a', bed: '#d8d1c1', grid: '#cbc3b1', grid10: '#b3a98f', edge: '#6b7280', ruler: '#161b22', rulerInk: '#9198a1', corner: '#161b22' },
 };
 // Selection, handles and the draft line: the page's purple accent, dark enough to read on the light bed.
 const SEL = '#7c3aed';
@@ -52,7 +53,13 @@ export interface WorkspaceEvents {
   onBoxSelect(ids: number[]): void;
   /** Right click: open the menu at `at` (css px in the page). The part under the pointer is selected first. */
   onMenu(at: { x: number; y: number }): void;
+  /** Trim tool: the bit a click at (mx, my) would cut away (bed mm), for the highlight; null if none. */
+  trimAt(mx: number, my: number, tolMm: number): [number, number][][] | null;
+  /** Trim tool: cut it away. */
+  onTrim(mx: number, my: number, tolMm: number): void;
 }
+
+export type Tool = 'select' | 'line' | 'curve' | 'trim';
 
 /** A local, not-yet-processed change to one part: its geometry is drawn mapped from `from` onto `to`. */
 interface Live { ids: number[]; from: Box; to: Box }
@@ -97,7 +104,8 @@ export class Workspace {
   /** Fingers (or pens/mice) currently down, for pinch zoom. */
   private pointers = new Map<number, { x: number; y: number }>();
   private touchSlop = 0; // extra px of handle hit area for fingers
-  private tool: 'select' | 'line' | 'curve' = 'select';
+  private tool: Tool = 'select';
+  private trimShow: [number, number][][] | null = null; // what a Trim click would cut away
   private unit = { mm: 1, label: 'mm' }; // display units for rulers and the live length
   private draft: [number, number][] = []; // points placed so far with the Line/Curve tool
   private cursor: [number, number] | null = null;
@@ -153,9 +161,10 @@ export class Workspace {
   }
 
   /** Select, or draw with the Line/Curve tool. */
-  setTool(t: 'select' | 'line' | 'curve'): void {
+  setTool(t: Tool): void {
     this.tool = t;
     this.draft = [];
+    this.trimShow = null;
     this.canvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
     this.draw();
   }
@@ -376,6 +385,12 @@ export class Workspace {
     this.touchSlop = e.pointerType === 'touch' ? 8 : 0;
     if (this.pointers.size === 2) return this.startPinch();
     if (this.pointers.size > 2) return;
+    if (this.tool === 'trim' && e.button === 0) {
+      this.ev.onTrim(p.mx, p.my, this.trimTol());
+      this.trimShow = this.ev.trimAt(p.mx, p.my, this.trimTol()); // the next bit under the pointer
+      this.draw();
+      return;
+    }
     if (this.tool !== 'select' && e.button === 0) {
       const pt = this.toolPoint(p.mx, p.my, e.shiftKey);
       if (this.tool === 'line') {
@@ -477,6 +492,12 @@ export class Workspace {
     const p = this.pt(e);
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: p.x, y: p.y });
     const gs = this.gesture;
+    if (this.tool === 'trim' && !gs) {
+      this.trimShow = this.ev.trimAt(p.mx, p.my, this.trimTol());
+      this.canvas.style.cursor = this.trimShow ? 'pointer' : 'crosshair';
+      this.draw();
+      return;
+    }
     if (this.tool !== 'select' && !gs) {
       this.cursor = this.toolPoint(p.mx, p.my, e.shiftKey);
       this.draw();
@@ -706,6 +727,7 @@ export class Workspace {
   /** The Line/Curve tool's points so far, and a rubber band to the pointer. */
   private drawDraft(): void {
     if (this.tool === 'select') return;
+    if (this.tool === 'trim') return this.drawTrim();
     this.drawTip(this.tool === 'line'
       ? 'Click two points, or drag  ·  Type a number for an exact length  ·  Enter or Esc to stop'
       : 'Click to add points  ·  Click the first point to close  ·  Double-click, Enter or Esc to finish  ·  Type a number for an exact length');
@@ -743,6 +765,27 @@ export class Workspace {
       g.arc(ox + x * s, oy + y * s, 4, 0, Math.PI * 2);
       g.fill();
     }
+  }
+
+  /** A finger is fatter than a mouse pointer. */
+  private trimTol(): number {
+    return (6 + this.touchSlop) / this.view.s;
+  }
+
+  private drawTrim(): void {
+    this.drawTip('Trim: click a line to cut away the bit between the lines that cross it  ·  Ctrl+Z puts it back  ·  Esc to stop');
+    if (!this.trimShow) return;
+    const g = this.g;
+    const { s, ox, oy } = this.view;
+    g.save();
+    g.strokeStyle = '#f97316';
+    g.lineWidth = 4;
+    g.lineCap = 'round';
+    g.setLineDash([6, 5]);
+    g.beginPath();
+    for (const path of this.trimShow) path.forEach(([x, y], i) => (i ? g.lineTo(ox + x * s, oy + y * s) : g.moveTo(ox + x * s, oy + y * s)));
+    g.stroke();
+    g.restore();
   }
 
   private drawTip(text: string): void {

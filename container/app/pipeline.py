@@ -7,7 +7,7 @@ import math
 
 from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .geometry.hatch import hatch
-from .geometry.order import nearest_neighbour, order_cuts
+from .geometry.order import join_paths, nearest_neighbour, order_cuts
 from .geometry.photo_import import PHOTO_KEY
 from .geometry.shapes_ops import outline, weld
 from .geometry.transform import bbox, place
@@ -214,10 +214,11 @@ def process(job: ContainerJob) -> ProcessResponse:
             shown = [i.pts for i in closed] + [i.pts for i in photo]
         elif off_bed:
             paths, shown = [], [i.pts for _, i in group]
-        elif kind == "score":
-            paths = shown = nearest_neighbour([i.pts for _, i in group])
         else:
-            paths = shown = order_cuts([i.pts for _, i in group])
+            # the preview keeps each part's own lines; only the laser's paths are joined
+            shown = [i.pts for _, i in group]
+            raw = join_paths(shown) if req.join_lines else shown
+            paths = nearest_neighbour(raw) if kind == "score" else order_cuts(raw)
         shown_by_part: dict[int, list[list[Pt]]] = {}
         for p in shown:
             shown_by_part.setdefault(owner[id(p[0])], []).append(p)
@@ -229,9 +230,7 @@ def process(job: ContainerJob) -> ProcessResponse:
     if off_bed:
         return res
 
-    res.estimate_s = round(estimate_seconds(layers, m.travel_speed_mm_s), 1)
-    if res.estimate_s > m.max_job_minutes * 60:
-        res.errors.append(f"This would take about {res.estimate_s / 60:.0f} minutes. The limit is {m.max_job_minutes:.0f}. Make it smaller or simpler.")
+    res.estimate_s = round(estimate_seconds(layers, m.travel_speed_mm_s), 1)  # shown, never a limit (Dalton)
 
     if res.errors or not layers:
         return res

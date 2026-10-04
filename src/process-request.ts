@@ -63,6 +63,7 @@ export function validateProcessRequest(body: unknown, fileFields: ReadonlySet<nu
   if (colorMap) out.colorMap = colorMap;
   const powerChoice = validatePowerChoice(body.powerChoice);
   if (powerChoice) out.powerChoice = powerChoice;
+  if (body.joinLines === false) out.joinLines = false;
   return out;
 }
 

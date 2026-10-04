@@ -138,3 +138,58 @@ def order_cuts(paths: list[list[Pt]]) -> list[list[Pt]]:
         ordered += group
         cur = group[-1][-1]
     return ordered
+
+
+JOIN_TOL_MM = 0.05
+
+
+def join_paths(paths: list[list[Pt]], tol: float = JOIN_TOL_MM) -> list[list[Pt]]:
+    """Drop exact repeats and chain open lines whose ends touch into single paths.
+
+    CAD files often draw a rectangle as four loose LINEs, or the same line twice (blocks, stacked layers).
+    Joined, the head cuts each outline in one go, never cuts a line twice, and a chain that closes counts
+    as a shape, so it is cut after its holes. Only the order and direction of points change."""
+    def key(pt: Pt) -> tuple[int, int]:
+        return round(pt[0] / tol), round(pt[1] / tol)
+
+    seen: set[tuple[tuple[int, int], ...]] = set()
+    closed: list[list[Pt]] = []
+    open_: list[list[Pt]] = []
+    for p in paths:
+        if len(p) < 2:
+            continue
+        k = tuple(key(pt) for pt in p)
+        if k in seen or k[::-1] in seen:
+            continue
+        seen.add(k)
+        (closed if len(p) >= 4 and k[0] == k[-1] else open_).append(p)
+
+    ends: dict[tuple[int, int], list[int]] = {}
+    for i, p in enumerate(open_):
+        ends.setdefault(key(p[0]), []).append(i)
+        ends.setdefault(key(p[-1]), []).append(i)
+    used = [False] * len(open_)
+
+    def take(at: Pt) -> list[Pt] | None:
+        """An unused path with an end at `at`, turned to start there."""
+        for j in ends.get(key(at), ()):
+            if not used[j]:
+                used[j] = True
+                q = open_[j]
+                return q if key(q[0]) == key(at) else q[::-1]
+        return None
+
+    out = list(closed)
+    for i, p in enumerate(open_):
+        if used[i]:
+            continue
+        used[i] = True
+        chain = list(p)
+        while key(chain[-1]) != key(chain[0]) and (q := take(chain[-1])) is not None:
+            chain += q[1:]
+        while key(chain[-1]) != key(chain[0]) and (q := take(chain[0])) is not None:
+            chain = q[::-1] + chain[1:]
+        if len(chain) >= 4 and key(chain[0]) == key(chain[-1]):
+            chain[-1] = chain[0]  # exactly closed, so ordering sees a shape
+        out.append(chain)
+    return out

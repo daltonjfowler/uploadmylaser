@@ -88,6 +88,7 @@ export interface ProcessRequest {
   parts: Part[];
   colorMap?: Record<string, ColorChoice>;
   powerChoice?: Partial<Record<OpKind, number>>; // clamped server-side to the teacher's range
+  joinLines?: boolean; // default true: touching lines are cut as one path, repeats dropped
 }
 
 export interface PreviewLayer { kind: OpKind; part: number; paths: [Mm, Mm][][] }

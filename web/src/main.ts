@@ -18,6 +18,7 @@ import { LaserLink } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
+import { nearestLine, trim, type TrimHit, type TrimLine } from './trim';
 import { zip } from './zip';
 import { boxPanels, outsideSize } from './boxmaker';
 import { adjust, runCount, toDots, toPbm } from './photo';
@@ -25,7 +26,7 @@ import { bounds, pointCount, toDxf, trace, type Pt as TracePt } from './trace';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
-import { cadAngle, Workspace, type Box, type Dim, type PartView } from './workspace';
+import { cadAngle, Workspace, type Box, type Dim, type PartView, type Tool } from './workspace';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -42,6 +43,7 @@ let group: number[] = [];      // several parts selected (Ctrl+A, Shift+click); 
 let color: OpKind = 'cut';
 let colorMap: Record<string, ColorChoice> = {};
 let powerChoice: Partial<Record<OpKind, number>> = {};
+let joinLines = true; // the server chains touching lines into single paths and drops repeats
 const hiddenOps = new Set<OpKind>(); // only the view: hidden colours still run on the laser
 let material: { w: number; h: number } | null = null; // the student's own board, drawn on the bed
 let clipboard: DesignPart[] = [];
@@ -93,7 +95,10 @@ const ws = new Workspace($<HTMLCanvasElement>('ws'), {
     else setGroup(pick);
   },
   onMenu: (at) => openMenu(at),
+  trimAt: (mx, my, tol) => trimPlan(mx, my, tol)?.removed ?? null,
+  onTrim: (mx, my, tol) => trimClick(mx, my, tol),
 });
+if (import.meta.env.DEV) Object.assign(window, { __ws: ws }); // browser tests find the bed on screen
 
 // ---------- startup ----------
 
@@ -160,11 +165,58 @@ function resultIndex(): ResultIndex {
   return byPart;
 }
 
+/** What the server drew for a part, by everything that decides it. Undo, Redo and a busy server then show
+ *  the real lines at once instead of grey sketches that cannot be recoloured. */
+const viewCache = new Map<string, PartView>();
+/** The colours the server found in each file (by its data), kept across results for the same reason. */
+const knownColors = new Map<string, { key: string; kind: OpKind | null }[]>();
+const dataIds = new Map<string, number>();
+const CACHE_MAX = 20000;
+
+function sigCtx(): string {
+  return JSON.stringify([materialId, colorMap, powerChoice, joinLines]);
+}
+
+function partSig(p: DesignPart, ctx: string): string {
+  const { id: _id, groupId: _group, source, ...placement } = p;
+  let src: unknown = source;
+  if (source.kind === 'file') {
+    let n = dataIds.get(source.data);
+    if (n === undefined) dataIds.set(source.data, n = dataIds.size);
+    src = { ...source, data: n, preview: undefined };
+  }
+  return `${ctx}|${JSON.stringify(placement)}|${JSON.stringify(src)}`;
+}
+
+/** Keep the parts' views and file colours from a fresh result (sigs made when the request was built). */
+function remember(res: ProcessResponse, ids: number[], sigs: string[]): void {
+  if (viewCache.size > CACHE_MAX || dataIds.size > CACHE_MAX) { viewCache.clear(); dataIds.clear(); }
+  const ix = resultIndex();
+  ids.forEach((id, i) => {
+    const box = res.partBoxes[i];
+    // copies of the layers: moving a part shifts the result's own lines in place
+    if (box) viewCache.set(sigs[i], { id, box, layers: ix.layers[i].map((l) => ({ ...l })), unassigned: ix.unassigned[i].flatMap((u) => u.paths) });
+  });
+  const found = new Map<number, { key: string; kind: OpKind | null }[]>();
+  for (const c of res.partColors ?? []) {
+    let list = found.get(c.part);
+    if (!list) found.set(c.part, list = []);
+    list.push({ key: c.key, kind: c.kind });
+  }
+  for (const [i, list] of found) {
+    const q = find(ids[i]);
+    if (q?.source.kind === 'file') knownColors.set(q.source.data, list);
+  }
+  if (knownColors.size > CACHE_MAX) knownColors.clear();
+}
+
 function viewOf(p: DesignPart): PartView {
   const ix = resultIndex();
   const i = ix.at.get(p.id) ?? -1;
   const box = i >= 0 ? result?.partBoxes[i] : null;
   if (result && box) return { id: p.id, box, layers: ix.layers[i], unassigned: ix.unassigned[i].flatMap((u) => u.paths) };
+  const seen = viewCache.get(partSig(p, sigCtx()));
+  if (seen) return { ...seen, id: p.id };
   return localView(p, renderSoon);
 }
 
@@ -547,10 +599,12 @@ $('toolCircle').onclick = () => addPart({ kind: 'shape', shape: 'circle', wMm: 4
 $('toolSelect').onclick = () => setTool('select');
 $('toolLine').onclick = () => setTool('line');
 $('toolCurve').onclick = () => setTool('curve');
+$('toolTrim').onclick = () => setTool('trim');
 
-function setTool(t: 'select' | 'line' | 'curve'): void {
+function setTool(t: Tool): void {
   ws.setTool(t);
-  for (const [id, name] of [['toolSelect', 'select'], ['toolLine', 'line'], ['toolCurve', 'curve']] as const) $(id).classList.toggle('on', name === t);
+  for (const [id, name] of [['toolSelect', 'select'], ['toolLine', 'line'], ['toolCurve', 'curve'], ['toolTrim', 'trim']] as const) $(id).classList.toggle('on', name === t);
+  if (t === 'trim') hint.textContent = 'Trim: click a line to cut away the bit between the lines that cross it. A line nothing crosses goes completely. Esc stops.';
   if (t === 'line') hint.textContent = 'Line: click two points, or drag. Hold Shift for straight and 45° lines. Esc cancels.';
   if (t === 'curve') hint.textContent = 'Curve: click points along the curve. Click the first point to close it, or double-click / press Enter to finish. Esc cancels.';
 }
@@ -704,6 +758,77 @@ function showPiecesNow(old: ProcessResponse, made: DesignPart[], pieces: Piece[]
   }
   result = next;
   resultIds = ids;
+}
+
+// ---------- trim ----------
+
+interface TrimPlan { p: DesignPart; keep: TrimLine[]; removed: [number, number][][] }
+
+/** What a Trim click at (mx, my) would do: the nearest line of any part, cut back to the nearest lines
+ *  crossing it (from every part). Works on the lines on screen, so the part needs its laser lines. */
+function trimPlan(mx: number, my: number, tol: number): TrimPlan | null {
+  const views = parts.map(viewOf);
+  const linesOf = (v: PartView) => v.layers.filter((l) => !hiddenOps.has(l.kind)).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
+  let best: { k: number; lines: TrimLine[]; hit: TrimHit } | null = null;
+  views.forEach((v, k) => {
+    const b = v.box;
+    if (!b || mx < b[0] - tol || mx > b[2] + tol || my < b[1] - tol || my > b[3] + tol) return;
+    const lines = linesOf(v);
+    const hit = nearestLine(lines, [mx, my], tol);
+    if (hit && (!best || hit.d <= best.hit.d)) best = { k, lines, hit };
+  });
+  if (!best) return null;
+  const { k, lines, hit } = best as { k: number; lines: TrimLine[]; hit: TrimHit };
+  const pts = lines[hit.line].pts;
+  const [x0, y0, x1, y1] = boundsOf([pts]);
+  const cutters = views.filter((v) => v.box && v.box[0] <= x1 && v.box[2] >= x0 && v.box[1] <= y1 && v.box[3] >= y0)
+    .flatMap((v) => [...v.layers.flatMap((l) => l.paths), ...(v.unassigned ?? [])]);
+  return { p: parts[k], ...trim(lines, hit, cutters) };
+}
+
+/** A loop, not Math.min(...): spreading a big file's points overflows the stack. */
+function boundsOf(paths: [number, number][][]): Box {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const path of paths) for (const [x, y] of path) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return [x0, y0, x1, y1];
+}
+
+function trimClick(mx: number, my: number, tol: number): void {
+  const plan = trimPlan(mx, my, tol);
+  if (!plan) {
+    if (!getPhrase()) warn('Trim works on the laser lines. Enter the class phrase first.');
+    return;
+  }
+  const { p, keep } = plan;
+  const i = resultIds.indexOf(p.id);
+  if (i >= 0 && result?.unassigned?.some((u) => u.part === i)) return warn('Choose what each colour does first (under Layers), then trim.');
+  if (!keep.length) { // the last line went: so does the part
+    parts = parts.filter((q) => q !== p);
+    dropLocal(p.id);
+    if (selection().includes(p.id)) select(null);
+    changed();
+    return;
+  }
+  const box = boundsOf(keep.map((l) => l.pts));
+  const s = p.source;
+  const was = s.kind === 'text' ? s.text.value.split('\n')[0] : s.kind === 'shape' ? (s.shape === 'box' ? 'Box' : 'Circle') : s.name;
+  const name = /\(trimmed\)$/.test(was) ? was : `${was.replace(/\.(dxf|svg)$/i, '')} (trimmed)`;
+  const data = pieceSvg({ lines: keep, box });
+  // the part keeps its id (so its selection and group stay) but becomes a plain drawing of what is left;
+  // weld and outline are already in these lines
+  p.source = { kind: 'file', name, fileType: 'svg', data };
+  Object.assign(p, { xMm: round(box[2]), yMm: round(box[1]), scale: 1, rotateDeg: 0 });
+  for (const f of ['scaleY', 'flipX', 'flipY', 'weld', 'outline'] as const) delete p[f];
+  dropLocal(p.id);
+  const kinds = RUN_ORDER.filter((kind) => keep.some((l) => l.kind === kind));
+  knownColors.set(data, kinds.map((kind) => ({ key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind })));
+  const layers = kinds.map((kind) => ({ kind, paths: keep.filter((l) => l.kind === kind).map((l) => l.pts) }));
+  if (result && i >= 0) { // show it at once; the server's answer replaces it
+    result.preview = [...result.preview.filter((l) => l.part !== i), ...layers.map((l) => ({ ...l, part: i }))];
+    result.partBoxes[i] = box;
+  }
+  changed();
+  viewCache.set(partSig(p, sigCtx()), { id: p.id, box, layers });
 }
 
 $('selectAll').onclick = selectAll;
@@ -1126,7 +1251,7 @@ function applyColor(op: OpKind): void {
     }
     else if (q?.source.kind === 'file') {
       // the whole file becomes this colour (each colour can be changed again in the colour list)
-      const keys = fileColors(q.id).map((c) => c.key);
+      const keys = fileColors(q).map((c) => c.key);
       if (keys.length) {
         q.source.colors = { ...q.source.colors, ...Object.fromEntries(keys.map((k) => [k, op])) };
         recolourNow([q.id], 'all', op);
@@ -1182,7 +1307,8 @@ function pickMaterial(id: string): void {
 function renderLayers(): void {
   const mat = materials.find((m) => m.id === materialId);
   // server layers (files), plus what the browser already knows about its own text, shapes and lines
-  const inDesign = new Set<OpKind>(result?.preview.map((l) => l.kind) ?? []);
+  const inDesign = new Set<OpKind>(); // from what is on screen, so Undo doesn't say "not in design"
+  for (const q of parts) for (const l of viewOf(q).layers) inDesign.add(l.kind);
   for (const q of parts) {
     if (q.source.kind === 'text') inDesign.add(q.source.text.op);
     else if (q.source.kind === 'shape' || q.source.kind === 'path') inDesign.add(q.source.op);
@@ -1417,51 +1543,75 @@ document.addEventListener('pointerdown', (e) => {
 });
 window.addEventListener('blur', closeMenu);
 
-/** The colours the server found in one part (from the last result), with what the file makes each one. */
-function fileColors(id: number): { key: string; kind: OpKind | null }[] {
-  const i = resultIds.indexOf(id);
-  return i < 0 ? [] : (result?.partColors ?? []).filter((c) => c.part === i);
+/** The colours the server found in a file, with what the file makes each one (kept across results). */
+function fileColors(p: DesignPart | undefined): { key: string; kind: OpKind | null }[] {
+  return p?.source.kind === 'file' ? knownColors.get(p.source.data) ?? [] : [];
 }
-
-/** Pattern copies share name and data. Ungroup pieces have their own names, so two identical pieces stay separate. */
-const copyKey = (s: Source & { kind: 'file' }) => `${s.name}
-${s.data}`;
 
 /** What a colour in a file does now: the student's choice, else the old design-wide one, else the file's own. */
 function colorNow(s: Source & { kind: 'file' }, key: string, kind: OpKind | null): ColorChoice | null {
   return s.colors?.[key] ?? colorMap[key] ?? kind;
 }
 
-/** Every colour in every file, grouped by file (pattern copies share one group), each one changeable any time. */
+/** Colour keys are `stroke:#hex`, `fill:#hex`, `dxf:LAYER|#hex` or `photo:dots`. Rows go by the colour alone,
+ *  so black lines in 90 pieces (or on 12 CAD layers) are one row. */
+function colourGroup(key: string): string {
+  const m = /#[0-9a-f]{6}$/i.exec(key);
+  return m ? m[0].toLowerCase() : key;
+}
+
+const NAMED: [string, number, number, number][] = [
+  ['Black', 0, 0, 0], ['Red', 220, 30, 30], ['Blue', 30, 60, 230], ['Green', 30, 160, 60], ['Yellow', 250, 220, 0],
+  ['Orange', 250, 140, 0], ['Purple', 130, 40, 170], ['Pink', 250, 120, 180], ['Light blue', 60, 200, 230],
+  ['Magenta', 240, 0, 240], ['Grey', 128, 128, 128], ['White', 255, 255, 255], ['Brown', 140, 80, 30],
+];
+function colourName(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  let best = NAMED[0], bestD = Infinity;
+  for (const n of NAMED) {
+    const d = (n[1] - r) ** 2 + (n[2] - g) ** 2 + (n[3] - b) ** 2;
+    if (d < bestD) { best = n; bestD = d; }
+  }
+  return best[0];
+}
+
+/** Every colour in the design in one short list: black, red and blue already know their jobs; anything else
+ *  (green, a CAD layer colour) asks what it should be. A choice changes that colour in every file. */
 function renderColors(): void {
   const ops = materials.find((m) => m.id === materialId)?.ops ?? RUN_ORDER;
-  const groups = new Map<string, { part: DesignPart & { source: { kind: 'file' } }; colors: { key: string; kind: OpKind | null }[] }>();
-  for (const p of parts) {
-    if (p.source.kind !== 'file' || groups.has(copyKey(p.source))) continue;
-    const colors = fileColors(p.id);
-    if (colors.length) groups.set(copyKey(p.source), { part: p as DesignPart & { source: { kind: 'file' } }, colors });
+  type FilePart = DesignPart & { source: Source & { kind: 'file' } };
+  interface Group { kinds: Set<OpKind | null>; keys: Set<string>; now: Set<ColorChoice | null> }
+  const files = parts.filter((p): p is FilePart => p.source.kind === 'file');
+  const groups = new Map<string, Group>();
+  for (const p of files) {
+    for (const c of fileColors(p)) {
+      const id = colourGroup(c.key);
+      let g = groups.get(id);
+      if (!g) groups.set(id, g = { kinds: new Set(), keys: new Set(), now: new Set() });
+      g.kinds.add(c.kind);
+      g.keys.add(c.key);
+      g.now.add(colorNow(p.source, c.key, c.kind));
+    }
   }
+  const unsure = (g: Group) => g.now.has(null);
   // an older server only lists the unknown ones
   const oldUnknown = result && !result.partColors ? result.unknownColors : [];
-  const anyUnsure = [...groups.values()].some((g) => g.colors.some((c) => !colorNow(g.part.source, c.key, c.kind))) || oldUnknown.length > 0;
+  const anyUnsure = [...groups.values()].some(unsure) || oldUnknown.length > 0;
   $('colors').hidden = !groups.size && !oldUnknown.length;
-  $('colorsTitle').textContent = anyUnsure ? 'What should these colours do?' : 'Colours in your files';
+  $('colorsTitle').textContent = anyUnsure ? 'What should these colours do?' : 'Colours in your design';
 
-  const row = (key: string, now: ColorChoice | null, pick: (c: ColorChoice) => void) => {
+  const row = (label: string, swatch: string | null, now: ColorChoice | null, ask: boolean, photo: boolean, pick: (c: ColorChoice) => void) => {
     const div = document.createElement('div');
-    div.className = 'colorrow';
-    const [kind, rest] = key.split(/:(.*)/s);
-    // DXF keys are `dxf:LAYER` or, for a colour we don't know, `dxf:LAYER|#rrggbb`
-    const [value, dxfColor] = kind === 'dxf' ? (rest ?? '').split(/\|(?=#[0-9a-f]{6}$)/i) : [rest];
+    div.className = 'colorrow' + (ask ? ' ask' : '');
     const sw = document.createElement('span');
     sw.className = 'swatch';
-    const swatch = dxfColor ?? value;
-    if (swatch?.startsWith('#')) sw.style.background = swatch;
+    if (swatch) sw.style.background = swatch;
     else if (now && now !== 'ignore') sw.style.background = OP_COLORS[now];
-    const label = document.createElement('span');
-    label.textContent = kind === 'dxf' ? `Layer "${value}"` : kind === 'photo' ? 'Photo' : `${kind === 'fill' ? 'Filled' : 'Lines'} ${value}`;
-    div.append(sw, label);
-    for (const choice of [...ops.filter((o) => kind !== 'photo' || o !== 'cut'), 'ignore'] as ColorChoice[]) {
+    const name = document.createElement('span');
+    name.textContent = label;
+    div.append(sw, name);
+    if (ask) div.append(Object.assign(document.createElement('span'), { className: 'small muted askline', textContent: 'The laser only knows black, red and blue. What should this colour do?' }));
+    for (const choice of [...ops.filter((o) => !photo || o !== 'cut'), 'ignore'] as ColorChoice[]) {
       const btn = document.createElement('button');
       btn.className = 'small' + (choice === now ? ' on' : '');
       btn.setAttribute('aria-pressed', String(choice === now));
@@ -1472,33 +1622,34 @@ function renderColors(): void {
     return div;
   };
 
+  const order = (g: Group) => (unsure(g) ? -1 : RUN_ORDER.indexOf([...g.kinds][0] as OpKind));
   const out: HTMLElement[] = [];
-  const MANY = 6;
-  let shown = [...groups];
-  if (groups.size > MANY) {
-    const picked = selection().map(find).filter((q) => q?.source.kind === 'file').map((q) => copyKey(q!.source as Source & { kind: 'file' }));
-    shown = shown.filter(([data, g]) => picked.includes(data) || g.colors.some((c) => !colorNow(g.part.source, c.key, c.kind)));
-    out.push(Object.assign(document.createElement('p'), { className: 'small muted', textContent: `${groups.size} files. Select one to change its colours.` }));
-  }
-  for (const [copies, g] of shown) {
-    if (groups.size > 1) out.push(Object.assign(document.createElement('div'), { className: 'colorfile small muted', textContent: g.part.source.name }));
-    for (const c of g.colors) {
-      out.push(row(c.key, colorNow(g.part.source, c.key, c.kind), (choice) => {
-        const was = colorNow(g.part.source, c.key, c.kind);
-        const alone = was !== 'ignore' && !g.colors.some((o) => o.key !== c.key && colorNow(g.part.source, o.key, o.kind) === was);
-        const ids: number[] = [];
-        for (const q of parts) { // copies of the same file change together
-          if (q.source.kind === 'file' && copyKey(q.source) === copies) {
-            q.source.colors = { ...q.source.colors, [c.key]: choice };
-            ids.push(q.id);
-          }
+  for (const [id, g] of [...groups].sort((a, b) => order(a[1]) - order(b[1]))) {
+    const photo = id === 'photo:dots';
+    const hex = id.startsWith('#') ? id : null;
+    const label = photo ? 'Photo' : hex ? (g.kinds.has(null) ? `${colourName(hex)} ${hex}` : colourName(hex)) : id;
+    const now = g.now.size === 1 ? [...g.now][0] : null; // mixed choices: none lit until one is picked
+    out.push(row(label, hex, now, unsure(g), photo, (choice) => {
+      const byWas = new Map<OpKind | null, number[]>(); // instant recolour, one pass per old colour
+      for (const p of files) {
+        const all = fileColors(p);
+        const mine = all.filter((c) => g.keys.has(c.key));
+        if (!mine.length) continue;
+        const was = new Set(mine.map((c) => colorNow(p.source, c.key, c.kind)));
+        const others = all.filter((c) => !g.keys.has(c.key)).map((c) => colorNow(p.source, c.key, c.kind));
+        p.source.colors = { ...p.source.colors, ...Object.fromEntries(mine.map((c) => [c.key, choice])) };
+        const w = [...was][0];
+        if (was.size === 1 && w !== 'ignore' && !others.includes(w)) {
+          let ids = byWas.get(w);
+          if (!ids) byWas.set(w, ids = []);
+          ids.push(p.id);
         }
-        if (alone) recolourNow(ids, was, choice);
-        changed();
-      }));
-    }
+      }
+      for (const [w, ids] of byWas) recolourNow(ids, w, choice);
+      changed();
+    }));
   }
-  for (const key of oldUnknown) out.push(row(key, colorMap[key] ?? null, (choice) => { colorMap[key] = choice; changed(); }));
+  for (const key of oldUnknown) out.push(row(key, null, colorMap[key] ?? null, true, false, (choice) => { colorMap[key] = choice; changed(); }));
   $('colorList').replaceChildren(...out);
 }
 
@@ -2117,7 +2268,7 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
     }
     ids.push(p.id);
   }
-  return { req: { materialId, parts: reqParts, colorMap, powerChoice }, files, ids };
+  return { req: { materialId, parts: reqParts, colorMap, powerChoice, ...(joinLines ? {} : { joinLines: false }) }, files, ids };
 }
 
 async function run(): Promise<void> {
@@ -2140,19 +2291,22 @@ async function run(): Promise<void> {
   }
   const mine = ++seq;
   setBusy(true);
+  const ctx = sigCtx();
+  const sigs = ids.map((id) => partSig(find(id)!, ctx));
   try {
     const res = await processDesign(req, files);
     if (mine !== seq) return; // a newer request superseded this one
     result = res;
     resultIds = ids;
     notes = [];
+    remember(res, ids, sigs);
   } catch (e) {
     if (mine !== seq) return;
     result = null;
     resultIds = [];
     notes = [(e as Error).message];
     if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-      setPhrase(''); // wrong or expired: the Laser panel shows the phrase button again
+      setPhrase(''); // wrong or expired: the phrase card at the top of the side panel asks again
     }
   }
   pending = false;
@@ -2167,6 +2321,53 @@ function askPhrase(): void {
   $<HTMLInputElement>('phrase').focus();
 }
 $('phraseBtn').onclick = askPhrase;
+$('phraseChange').onclick = askPhrase;
+
+const joinBox = $<HTMLInputElement>('joinLines');
+joinBox.onchange = () => { joinLines = joinBox.checked; save(); schedule(); render(); };
+
+// ---------- side panel: drag its edge to resize, fold any box away ----------
+
+const PANELS_W = 'uml.panelsW';
+const PANELS_SHUT = 'uml.panelsShut';
+const workarea = document.querySelector<HTMLElement>('.workarea')!;
+function setPanelsW(w: number): number {
+  w = clamp(Math.round(w), 240, Math.max(240, Math.min(720, window.innerWidth - 420)));
+  workarea.style.setProperty('--panels-w', `${w}px`);
+  return w;
+}
+try {
+  const w = Number(localStorage.getItem(PANELS_W));
+  if (w) setPanelsW(w);
+} catch { /* storage blocked: default width */ }
+const grip = $('panelGrip');
+grip.onpointerdown = (e) => {
+  e.preventDefault();
+  grip.setPointerCapture(e.pointerId);
+  grip.classList.add('on');
+  let w = 0;
+  grip.onpointermove = (ev) => { w = setPanelsW(workarea.getBoundingClientRect().right - ev.clientX); };
+  grip.onpointerup = grip.onpointercancel = () => {
+    grip.onpointermove = grip.onpointerup = grip.onpointercancel = null;
+    grip.classList.remove('on');
+    try { if (w) localStorage.setItem(PANELS_W, String(w)); } catch { /* fine */ }
+  };
+};
+grip.ondblclick = () => {
+  workarea.style.removeProperty('--panels-w');
+  try { localStorage.removeItem(PANELS_W); } catch { /* fine */ }
+};
+{
+  let shut: string[] = [];
+  try { shut = JSON.parse(localStorage.getItem(PANELS_SHUT) ?? '[]'); } catch { /* fine */ }
+  for (const d of document.querySelectorAll<HTMLDetailsElement>('.panels details.panel')) {
+    if (shut.includes(d.id)) d.open = false;
+    d.addEventListener('toggle', () => {
+      const now = [...document.querySelectorAll<HTMLDetailsElement>('.panels details.panel')].filter((x) => !x.open).map((x) => x.id);
+      try { localStorage.setItem(PANELS_SHUT, JSON.stringify(now)); } catch { /* fine */ }
+    });
+  }
+}
 
 $('gateLater').onclick = () => { $('gate').hidden = true; };
 
@@ -2196,7 +2397,11 @@ function jobBoxNow(): void {
 function render(): void {
   const views = parts.map(viewOf);
   ws.setParts(views, unionBox(views.map((v) => v.box)), !pending && !!result?.errors.length);
-  $('phraseBtn').hidden = !!getPhrase();
+  const hasPhrase = !!getPhrase();
+  $('phraseNeed').hidden = hasPhrase;
+  $('phraseOk').hidden = !hasPhrase;
+  $('phraseCard').classList.toggle('ok', hasPhrase);
+  joinBox.checked = joinLines;
   renderSizebar();
   renderLayers();
   renderColors();
@@ -2477,7 +2682,7 @@ function defaultHint(): void {
     : !parts.length
       ? 'Open an SVG or DXF file, or use Text, Box or Circle on the left.'
       : !getPhrase()
-        ? 'Arrange your design. When you are ready, enter the class phrase in the Laser panel to check it.'
+        ? 'Arrange your design. When you are ready, enter the class phrase at the top right to check it.'
         : 'Drag parts to move them. Drag on empty bed to box-select; right-click for more. Scroll to zoom; Shift+drag or the middle button pans. Then connect the laser and Send.';
 }
 
@@ -2495,7 +2700,7 @@ function saveNow(): void {
   clearTimeout(saveTimer);
   saveTimer = 0;
   try {
-    localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, materialId, color, locked, unit, material }));
+    localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, materialId, color, locked, unit, material, joinLines }));
   } catch {
     /* too big for storage: the design still works, it just won't survive a reload */
   }
@@ -2514,6 +2719,7 @@ function restore(): void {
     if (mt && Number(mt.w) > 0 && Number(mt.h) > 0) material = { w: Number(mt.w), h: Number(mt.h) };
     if (s.color in OP_LABELS) color = s.color;
     if (s.locked === false) locked = false;
+    if (s.joinLines === false) joinLines = false;
     if (s.unit === 'cm' || s.unit === 'in') unit = s.unit;
     nextId = Math.max(0, ...parts.map((p) => p.id)) + 1;
   } catch {

@@ -58,9 +58,7 @@ def test_svg_square_with_hole_engrave_and_score():
     x0, y0, x1, y1 = res.bbox_mm
     assert abs(x0 - 20) < 0.01 and abs(x1 - 70) < 0.01  # 50mm wide, units honoured
     cut = next(p for p in res.preview if p.kind == "cut")
-    assert len(cut.paths) == 2
-    # inner circle is cut before the outer square
-    assert max(x for x, _ in cut.paths[0]) < 60
+    assert len(cut.paths) == 2  # the preview keeps the file's lines; cut order is tested on order_cuts
 
 
 def test_relative_mode_anchors_top_right_at_head():
@@ -381,3 +379,27 @@ def test_a_photo_is_never_cut_through_and_its_outline_is_its_rectangle():
     assert res.errors == []
     kinds = [p.kind for p in res.preview]
     assert kinds == ["engrave", "cut"] and len(res.preview[1].paths) == 1  # the dots engrave; one outline cuts
+
+
+def test_join_paths_chains_loose_lines_into_a_closed_shape_and_drops_repeats():
+    from app.geometry.order import join_paths
+    sq = [[(0.0, 0.0), (10.0, 0.0)], [(10.0, 10.0), (10.0, 0.0)], [(10.0, 10.0), (0.0, 10.0)], [(0.0, 10.0), (0.0, 0.0)]]
+    out = join_paths(sq + [[(10.0, 0.0), (0.0, 0.0)]])  # the last is the first line again, drawn backwards
+    assert len(out) == 1
+    p = out[0]
+    assert p[0] == p[-1] and len(p) == 5
+    assert {(round(x), round(y)) for x, y in p} == {(0, 0), (10, 0), (10, 10), (0, 10)}
+
+
+def test_join_paths_keeps_separate_lines_separate():
+    from app.geometry.order import join_paths
+    out = join_paths([[(0.0, 0.0), (5.0, 0.0)], [(6.0, 0.0), (9.0, 0.0)]])
+    assert len(out) == 2
+
+
+def test_loose_lines_rectangle_is_cut_after_its_hole():
+    from app.geometry.order import join_paths
+    outer = [[(0.0, 0.0), (50.0, 0.0)], [(50.0, 0.0), (50.0, 50.0)], [(50.0, 50.0), (0.0, 50.0)], [(0.0, 50.0), (0.0, 0.0)]]
+    hole = [(20.0, 20.0), (30.0, 20.0), (30.0, 30.0), (20.0, 30.0), (20.0, 20.0)]
+    out = order_cuts(join_paths(outer + [hole]))
+    assert out[0] == hole and len(out) == 2

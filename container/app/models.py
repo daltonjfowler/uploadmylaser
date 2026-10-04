@@ -100,6 +100,7 @@ class ProcessRequest(_Camel):
     parts: list[Part] = Field(min_length=1, max_length=MAX_PARTS)
     color_map: dict[str, ColorChoice] = {}
     power_choice: dict[OpKind, float] = {}  # only honoured for ops with a student range
+    join_lines: bool = True  # chain touching lines into single paths and drop repeats (cut and mark)
 
 
 class ContainerJob(_Camel):

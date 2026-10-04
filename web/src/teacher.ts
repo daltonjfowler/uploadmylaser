@@ -306,7 +306,7 @@ $('saveMats').onclick = async () => {
 const MACHINE_FIELDS: [keyof MachineConfig, string][] = [
   ['bedWidthMm', 'Bed width (mm)'], ['bedHeightMm', 'Bed height (mm)'],
   ['absoluteMaxPowerPct', 'Absolute max power (%)'], ['minSpeedMmS', 'Min speed (mm/s)'],
-  ['maxJobMinutes', 'Max job length (min)'], ['travelSpeedMmS', 'Travel speed for estimates (mm/s)'],
+  ['travelSpeedMmS', 'Travel speed for estimates (mm/s)'],
   ['swizzleMagic', 'Swizzle magic (136 = 0x88)'], ['baud', 'Baud'],
 ];
 

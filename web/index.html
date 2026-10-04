@@ -94,6 +94,7 @@
       <button id="toolCircle" class="tool" data-hint="Circle: add a circle. Uses the colour picked below.">◯<span>Circle</span></button>
       <button id="toolLine" class="tool" data-hint="Line: click two points, or drag. Shift keeps it straight or at 45°.">╱<span>Line</span></button>
       <button id="toolCurve" class="tool" data-hint="Curve: click points to draw a smooth curve. Click the first point to close it.">∿<span>Curve</span></button>
+      <button id="toolTrim" class="tool" data-hint="Trim (like AutoCAD): click a line to cut away the bit between the lines that cross it. A line nothing crosses goes completely.">✂<span>Trim</span></button>
       <button id="toolShapes" class="tool" data-hint="Shapes: stars, hearts, sports balls, callouts and more.">★<span>Shapes</span></button>
       <button id="toolPicture" class="tool" data-hint="Picture: trace a logo or drawing into outlines (like Image Trace), or engrave a photo.">🖼<span>Picture</span></button>
       <button id="toolBoxMaker" class="tool" data-hint="Box maker: a box with finger joints that press together, sized for your material.">📦<span>Box maker</span></button>
@@ -120,9 +121,21 @@
       </div>
     </section>
 
-    <aside class="panels">
-      <section class="panel">
-        <h2>Layers</h2>
+    <div id="panelGrip" class="panelgrip" role="separator" aria-orientation="vertical" aria-label="Drag to make the side panel wider or narrower" data-hint="Drag to make this side wider or narrower. Double-click to reset."></div>
+    <aside class="panels" id="panels">
+      <section class="panel phrasecard" id="phraseCard">
+        <div id="phraseNeed">
+          <h2>Class phrase</h2>
+          <p class="small">Ask your teacher for today's phrase. Your laser lines appear after you enter it.</p>
+          <button id="phraseBtn" class="go wide" data-hint="Your teacher gives you today's phrase. It lets the laser processor check your design.">🔑 Enter class phrase</button>
+        </div>
+        <div id="phraseOk" class="phraseok" hidden>
+          <span>✓ Class phrase entered</span>
+          <button id="phraseChange" type="button" class="small">Change</button>
+        </div>
+      </section>
+      <details class="panel" id="layersPanel" open>
+        <summary><h2>Layers</h2></summary>
         <div class="matlabel block">Material</div>
         <div id="materialList" class="matlist" role="radiogroup" aria-label="Material"></div>
         <div class="mymat" data-hint="The size of your piece of material. It shows on the bed, and you get a warning if your design is bigger.">
@@ -135,12 +148,12 @@
         <ol id="layers" class="layers"></ol>
         <div id="colors" class="colors" hidden>
           <h3 id="colorsTitle">What should these colours do?</h3>
-          <div id="colorList"></div>
+          <div id="colorList" class="colorlist"></div>
         </div>
-      </section>
+      </details>
 
-      <section class="panel" id="partPanel" hidden>
-        <h2>Selected part</h2>
+      <details class="panel" id="partPanel" open hidden>
+        <summary><h2>Selected part</h2></summary>
         <label class="check" data-hint="Weld: overlapping shapes of the same colour become one outline. Good for cut-out names in joined-up fonts."><input type="checkbox" id="pWeld"> Weld overlapping shapes</label>
         <label class="check" data-hint="A Cut through line all the way around this part. Makes keychains, tags and stickers."><input type="checkbox" id="pOutline"> Cut an outline around it</label>
         <div class="indent">
@@ -148,14 +161,14 @@
           <label class="check"><input type="checkbox" id="pHole"> Keyring hole</label>
           <label><input id="pHoleMm" type="number" min="2" max="12" step="any" value="5"> mm</label>
         </div>
-      </section>
+      </details>
 
-      <section class="panel">
-        <h2>Laser</h2>
+      <details class="panel" id="laserPanel" open>
+        <summary><h2>Laser</h2></summary>
         <p class="small muted">Start from: <b>laser head</b> · Job origin: <b>top-right</b></p>
-        <button id="phraseBtn" class="wide" data-hint="Your teacher gives you today's phrase. It lets the laser processor check your design.">🔑 Enter class phrase</button>
         <ol id="steps" class="steps"></ol>
         <p id="estimate" class="small"></p>
+        <label class="check" data-hint="Lines whose ends touch are cut as one path, and a line drawn twice is cut only once. Cleaner, faster cuts, and loose CAD lines cut holes first."><input type="checkbox" id="joinLines" checked> Join touching lines</label>
         <ul id="messages" class="messages"></ul>
         <label class="ack"><input type="checkbox" id="ack"> The lid is closed and I will stay with the laser the whole time.</label>
         <label class="panelname" id="panelNameRow" hidden data-hint="The name your job gets in the laser's file list. Up to 8 letters or numbers.">Name on the laser <input id="panelName" maxlength="8" autocomplete="off" spellcheck="false"></label>
@@ -164,7 +177,7 @@
         <button id="exportTeacher" class="wide" data-hint="One file for your teacher: your design, the laser file (when it is ready) and a note. Use it when there is no laser here or something went wrong.">📦 Export for teacher</button>
         <button id="downloadRd" class="wide" disabled data-hint="No laser in this room? Save the finished job as a laser file (.rd) and give it to your teacher. Or use Save to keep the design and open it again later.">⬇ Download laser file</button>
         <button id="stop" class="stop wide" hidden>STOP</button>
-      </section>
+      </details>
     </aside>
   </main>
 
