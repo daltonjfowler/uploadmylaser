@@ -1,10 +1,10 @@
 // In-browser previews, so the tools work before the class phrase is entered (or while the server
 // works). Boxes and circles are exact. Text and SVG files are close. DXF shows a grey outline of its lines
 // (dxf.ts). The server's preview replaces these as soon as it arrives.
-import type { ColorChoice, OpKind, PartExtras, Placement, TextSpec } from '../../shared/contracts';
+import type { ColorChoice, DxfUnits, OpKind, PartExtras, Placement, TextSpec } from '../../shared/contracts';
 import { TEXT_FONTS } from '../../shared/contracts';
 import { OP_COLORS, UNSURE } from './ops';
-import { sketchDxf, type DxfSketch } from './dxf';
+import { sketchDxf, UNIT_MM, type DxfSketch } from './dxf';
 import { pbmSize } from './photo';
 import type { ShapeKind, ViewBox } from './shapes';
 import type { Box, PartView } from './workspace';
@@ -12,7 +12,8 @@ import type { Box, PartView } from './workspace';
 export type Source =
   /** colors: the student's choice per colour key (replaced, never changed in place: Undo shares it) */
   /** pbm: a photo as dots (data), with a small picture of the dots (preview, a data URL) to draw locally */
-  | { kind: 'file'; name: string; fileType: 'svg' | 'dxf' | 'pbm'; data: string; colors?: Record<string, ColorChoice>; preview?: string }
+  /** units: a DXF's "I drew in" ($INSUNITS code, see DxfUnits), ahead of what the file says */
+  | { kind: 'file'; name: string; fileType: 'svg' | 'dxf' | 'pbm'; data: string; colors?: Record<string, ColorChoice>; preview?: string; units?: DxfUnits }
   | { kind: 'text'; text: TextSpec }
   | { kind: 'shape'; shape: ShapeKind; wMm: number; hMm: number; op: OpKind }
   /** Library shapes and the Line/Curve tools: an SVG path stretched from its bounds `vb` to wMm x hMm. */
@@ -24,15 +25,15 @@ export interface DesignPart extends Placement, PartExtras { id: number; source: 
 const PX_MM = 25.4 / 96;
 const UNITS: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: PX_MM, '': PX_MM };
 
-interface FileInfo { data: string; w: number; h: number; img: HTMLImageElement | null; dxf: DxfSketch | null; known: boolean }
+interface FileInfo { data: string; units?: number; w: number; h: number; img: HTMLImageElement | null; dxf: DxfSketch | null; known: boolean }
 const files = new Map<number, FileInfo>();
 
 /** Natural size in mm, before scale and rotation. */
 function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => void): FileInfo {
   const cached = files.get(p.id);
-  if (cached && cached.data === p.source.data) return cached;
-  const { data, fileType } = p.source;
-  let info: FileInfo = { data, w: 50, h: 50, img: null, dxf: null, known: false };
+  if (cached && cached.data === p.source.data && cached.units === p.source.units) return cached;
+  const { data, fileType, units } = p.source;
+  let info: FileInfo = { data, units, w: 50, h: 50, img: null, dxf: null, known: false };
   if (fileType === 'pbm') {
     const size = pbmSize(data);
     if (size) info = { ...info, w: size[0], h: size[1], known: true };
@@ -57,7 +58,7 @@ function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => vo
       sk = null; // the server reads it properly and explains any problem
     }
     if (sk) {
-      const k = sk.mmPerUnit;
+      const k = (units !== undefined ? UNIT_MM[units] : undefined) ?? sk.mmPerUnit; // the student's "I drew in" first
       info = { ...info, w: Math.max(sk.vb.w * k, 0.1), h: Math.max(sk.vb.h * k, 0.1), dxf: sk, known: true };
     } else {
       const size = dxfSize(data);

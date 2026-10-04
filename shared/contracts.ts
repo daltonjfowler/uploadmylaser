@@ -75,10 +75,14 @@ export interface TextSpec { value: string; font: TextFontId; heightMm: number; o
 
 /** One thing on the workspace: an uploaded file (multipart field `file<fileIndex>`) or typed text.
  *  Boxes and circles are drawn by the browser as small SVG files. */
+/** The units a DXF was drawn in, as $INSUNITS codes: 1 inches (and AutoCAD Architectural), 2 feet, 4 mm, 5 cm, 6 m. */
+export type DxfUnits = 1 | 2 | 4 | 5 | 6;
+export const DXF_UNITS: readonly DxfUnits[] = [1, 2, 4, 5, 6];
+
 export type Part = Placement & PartExtras & (
   // colorMap: this file's own colour choices, ahead of the request-wide one (so Box/Circle are never touched)
   // pbm: a photo the browser turned into black and white dots (binary PBM with a size comment)
-  | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf' | 'pbm'; colorMap?: Record<string, ColorChoice> }
+  | { kind: 'file'; fileIndex: number; fileType: 'svg' | 'dxf' | 'pbm'; colorMap?: Record<string, ColorChoice>; dxfUnits?: DxfUnits }
   | { kind: 'text'; text: TextSpec }
 );
 

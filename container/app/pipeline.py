@@ -51,7 +51,7 @@ def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings
             from .geometry.svg_import import import_svg
             return import_svg(data, warnings, budget=budget)
         from .geometry.dxf_import import import_dxf
-        return import_dxf(data, warnings, budget=budget)
+        return import_dxf(data, warnings, budget=budget, units=part.dxf_units)
     except TooDetailed:
         raise
     except ImportProblem as e:  # read fine, but nothing we can laser: say what to change

@@ -4,8 +4,8 @@
 // send power or speed; the Worker resolves Material + MachineConfig from KV.
 // Pure: test/process-request.test.mjs runs it.
 
-import type { ColorChoice, OpKind, Part, PartExtras, Placement, ProcessRequest, TextFontId } from '../shared/contracts.ts';
-import { MAX_PARTS, TEXT_FONTS } from '../shared/contracts.ts';
+import type { ColorChoice, DxfUnits, OpKind, Part, PartExtras, Placement, ProcessRequest, TextFontId } from '../shared/contracts.ts';
+import { DXF_UNITS, MAX_PARTS, TEXT_FONTS } from '../shared/contracts.ts';
 import { HttpError } from './http.ts';
 import { OPS } from './presets.ts';
 
@@ -107,7 +107,8 @@ function validatePart(p: unknown, n: number, fileFields: ReadonlySet<number>): P
     }
     if (fileType !== 'svg' && fileType !== 'dxf' && fileType !== 'pbm') bad(`Part ${n} must be an SVG or DXF file, or a photo.`);
     const colorMap = validateColorMap(p.colorMap);
-    return { kind: 'file', fileIndex, fileType, ...placement, ...(colorMap ? { colorMap } : {}) };
+    const dxfUnits = fileType === 'dxf' && DXF_UNITS.includes(p.dxfUnits as DxfUnits) ? { dxfUnits: p.dxfUnits as DxfUnits } : {};
+    return { kind: 'file', fileIndex, fileType, ...placement, ...(colorMap ? { colorMap } : {}), ...dxfUnits };
   }
 
   if (p.kind === 'text') {

@@ -157,3 +157,17 @@ test('mirror, weld and outline are kept when sane and dropped or refused otherwi
   const t = validateProcessRequest({ ...good(), parts: [{ ...textPart(), weld: true, outline: { distMm: 2 } }] }, FILES).parts[0];
   assert.deepEqual([t.weld, t.outline], [true, { distMm: 2 }]);
 });
+
+test('a DXF part may say which units it was drawn in; anything else is dropped', () => {
+  const b = good();
+  b.parts[2].dxfUnits = 1;
+  assert.equal(validateProcessRequest(b, FILES).parts[2].dxfUnits, 1);
+  for (const bad of [3, 0, '1', 25.4, null]) {
+    const c = good();
+    c.parts[2].dxfUnits = bad;
+    assert.equal(validateProcessRequest(c, FILES).parts[2].dxfUnits, undefined);
+  }
+  const svg = good();
+  svg.parts[0].dxfUnits = 1; // only DXF parts carry units
+  assert.equal(validateProcessRequest(svg, FILES).parts[0].dxfUnits, undefined);
+});

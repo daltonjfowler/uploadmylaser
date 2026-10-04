@@ -7,9 +7,9 @@ import '@fontsource/permanent-marker/latin-400.css';
 import '@fontsource/pacifico/latin-400.css';
 import '@fontsource/allerta-stencil/latin-400.css';
 import type {
-  ColorChoice, OpKind, Part, PartExtras, Placement, ProcessRequest, ProcessResponse, PublicMaterial, TextFontId, TextSpec,
+  ColorChoice, DxfUnits, OpKind, Part, PartExtras, Placement, ProcessRequest, ProcessResponse, PublicMaterial, TextFontId, TextSpec,
 } from '../../shared/contracts';
-import { MAX_PARTS, MAX_UPLOAD_BYTES, TEXT_FONTS } from '../../shared/contracts';
+import { DXF_UNITS, MAX_PARTS, MAX_UPLOAD_BYTES, TEXT_FONTS } from '../../shared/contracts';
 import { ApiError, checkPhrase, getMachine, getMaterials, getPhrase, processDesign, setPhrase, type PublicMachine } from './api';
 import { OP_COLORS, OP_LABELS, RUN_ORDER } from './ops';
 import { cleanPanelName } from './ruida/panel';
@@ -23,7 +23,7 @@ import { zip } from './zip';
 import { boxPanels, outsideSize } from './boxmaker';
 import { adjust, runCount, toDots, toPbm } from './photo';
 import { bounds, pointCount, toDxf, trace, type Pt as TracePt } from './trace';
-import { binaryStringToBytes, bytesToBinaryString, dxfFlavour } from './dxf';
+import { binaryStringToBytes, bytesToBinaryString, dxfFlavour, dxfUnitsCode, sketchDxf, UNIT_MM as DXF_UNIT_MM } from './dxf';
 import { dropLocal, localView, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
 import { cadAngle, Workspace, type Box, type Dim, type PartView, type Tool } from './workspace';
@@ -437,7 +437,73 @@ async function readFile(f: File): Promise<Source | null> {
   }
   // A binary DXF is kept one char per byte and sent as the same bytes (see buildRequest).
   const data = flavour === 'binary' ? bytesToBinaryString(bytes) : new TextDecoder().decode(bytes);
-  return { kind: 'file', name: f.name, fileType: 'dxf', data };
+  const units = await askUnits(f.name, flavour === 'ascii' ? data : null);
+  if (units === null) return null; // cancelled
+  return { kind: 'file', name: f.name, fileType: 'dxf', data, units };
+}
+
+// ---------- DXF units: "I drew in ..." (Dalton: AutoCAD files often say the wrong units, or none) ----------
+
+const UNIT_CHOICES: { key: string; code: DxfUnits; label: string }[] = [
+  { key: 'mm', code: 4, label: 'Millimetres (mm)' },
+  { key: 'cm', code: 5, label: 'Centimetres (cm)' },
+  { key: 'm', code: 6, label: 'Metres (m)' },
+  { key: 'in', code: 1, label: 'Inches (in)' },
+  { key: 'arch', code: 1, label: 'Architectural: feet and inches (AutoCAD)' },
+  { key: 'ft', code: 2, label: 'Feet (decimal)' },
+];
+const UNIT_SAID: Record<number, string> = { 0: 'no units', 1: 'inches', 2: 'feet', 4: 'millimetres', 5: 'centimetres', 6: 'metres', 10: 'yards', 14: 'decimetres' };
+const UNITS_KEY = 'uml.dxfUnits';
+
+/** Ask which units a DXF was drawn in, showing the size each choice makes. Null when cancelled. */
+function askUnits(name: string, ascii: string | null): Promise<DxfUnits | null> {
+  let said = 0;
+  let w = 0, h = 0;
+  if (ascii) {
+    said = dxfUnitsCode(ascii);
+    try {
+      const sk = sketchDxf(ascii);
+      if (sk) [w, h] = [sk.vb.w, sk.vb.h];
+    } catch { /* no preview size: the server still reads it */ }
+  }
+  let last = '';
+  try { last = localStorage.getItem(UNITS_KEY) ?? ''; } catch { /* fine */ }
+  const fromFile = UNIT_CHOICES.find((c) => c.code === said);
+  const start = fromFile && !(said === 1 && last === 'arch') ? fromFile.key : UNIT_CHOICES.some((c) => c.key === last) ? last : 'mm';
+
+  $('unitsInfo').textContent = `${name} · the file says: ${UNIT_SAID[said] ?? `unit code ${said}`}.`;
+  const fmt = (mm: number) => (mm >= 100 ? Math.round(mm) : Math.round(mm * 10) / 10);
+  $('unitsList').replaceChildren(...UNIT_CHOICES.map((c) => {
+    const label = document.createElement('label');
+    const radio = Object.assign(document.createElement('input'), { type: 'radio', name: 'units', value: c.key, checked: c.key === start });
+    const size = document.createElement('span');
+    size.className = 'size';
+    if (w && h) {
+      const [mw, mh] = [w * DXF_UNIT_MM[c.code], h * DXF_UNIT_MM[c.code]];
+      const fits = (mw <= machine.bedWidthMm && mh <= machine.bedHeightMm) || (mh <= machine.bedWidthMm && mw <= machine.bedHeightMm);
+      size.textContent = `${fmt(mw)} × ${fmt(mh)} mm (${fmt(mw / 25.4)} × ${fmt(mh / 25.4)} in)${fits ? '' : ' · bigger than the laser bed'}`;
+      if (!fits || Math.max(mw, mh) < 2) size.classList.add('big');
+    }
+    label.append(radio, document.createTextNode(c.label), size);
+    return label;
+  }));
+  $('unitsDlg').hidden = false;
+  ($('unitsList').querySelector('input:checked') as HTMLInputElement | null)?.focus();
+  return new Promise((resolve) => {
+    const done = (v: DxfUnits | null) => {
+      $('unitsDlg').hidden = true;
+      $<HTMLFormElement>('unitsForm').onsubmit = null;
+      $('unitsCancel').onclick = null;
+      resolve(v);
+    };
+    $<HTMLFormElement>('unitsForm').onsubmit = (e) => {
+      e.preventDefault();
+      const key = ($('unitsList').querySelector('input:checked') as HTMLInputElement | null)?.value ?? 'mm';
+      try { localStorage.setItem(UNITS_KEY, key); } catch { /* fine */ }
+      done(UNIT_CHOICES.find((c) => c.key === key)!.code);
+    };
+    $('unitsCancel').onclick = () => done(null);
+  });
 }
 
 // ---------- design files (.uml): save the workspace, open it later or on another computer ----------
@@ -491,7 +557,8 @@ function okSource(s: Record<string, unknown>): boolean {
   const t = s.text as Record<string, unknown> | undefined;
   const vb = s.vb as Record<string, unknown> | undefined;
   switch (s.kind) {
-    case 'file': return typeof s.name === 'string' && typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf' || s.fileType === 'pbm');
+    case 'file': return typeof s.name === 'string' && typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf' || s.fileType === 'pbm')
+      && (s.units === undefined || DXF_UNITS.includes(s.units as DxfUnits));
     case 'text': return !!t && typeof t.value === 'string' && typeof t.font === 'string' && num(t.heightMm) && typeof t.op === 'string';
     case 'shape': return (s.shape === 'box' || s.shape === 'circle') && num(s.wMm) && num(s.hMm) && typeof s.op === 'string';
     case 'path': return typeof s.d === 'string' && !!vb && [vb.x, vb.y, vb.w, vb.h].every(num) && num(s.wMm) && num(s.hMm) && typeof s.op === 'string';
@@ -1876,6 +1943,12 @@ function renderPartPanel(): void {
   box.hidden = !p;
   if (!p) return;
   const set = (id: string, v: boolean) => { $<HTMLInputElement>(id).checked = v; };
+  const dxf = p.source.kind === 'file' && p.source.fileType === 'dxf' ? p.source : null;
+  $('pUnitsRow').hidden = !dxf;
+  if (dxf) {
+    const said = dxf.units ?? (dxfFlavour(dxf.data.slice(0, 32)) === 'ascii' ? dxfUnitsCode(dxf.data) : 0);
+    $<HTMLSelectElement>('pUnits').value = String(DXF_UNITS.includes(said as DxfUnits) ? said : 4);
+  }
   set('pWeld', !!p.weld);
   set('pOutline', !!p.outline);
   set('pHole', !!p.outline?.holeMm);
@@ -1900,6 +1973,14 @@ function readPartPanel(): void {
   changed();
 }
 for (const id of ['pWeld', 'pOutline', 'pHole', 'pDist', 'pHoleMm']) $(id).addEventListener('change', readPartPanel);
+$('pUnits').addEventListener('change', () => {
+  const p = find(selected);
+  if (p?.source.kind !== 'file' || p.source.fileType !== 'dxf') return;
+  const code = Number($<HTMLSelectElement>('pUnits').value) as DxfUnits;
+  if (!DXF_UNITS.includes(code)) return;
+  p.source = { ...p.source, units: code }; // a new source: Undo snapshots share the old one
+  changed();
+});
 
 // ---------- my material ----------
 
@@ -2264,7 +2345,8 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
       }
       if (s.kind === 'shape' || s.kind === 'path') { pl.scale = 1; delete pl.scaleY; }
       const own = s.kind === 'file' && s.colors && Object.keys(s.colors).length ? { colorMap: s.colors } : {};
-      reqParts.push({ ...pl, kind: 'file', fileIndex, fileType: s.kind === 'file' ? s.fileType : 'svg', ...own });
+      const units = s.kind === 'file' && s.fileType === 'dxf' && s.units ? { dxfUnits: s.units } : {};
+      reqParts.push({ ...pl, kind: 'file', fileIndex, fileType: s.kind === 'file' ? s.fileType : 'svg', ...own, ...units });
     }
     ids.push(p.id);
   }

@@ -29,7 +29,9 @@ UNIT_MM = {
     9: 0.0254, 10: 914.4, 11: 1e-7, 12: 1e-6, 13: 1e-3, 14: 100.0, 15: 10_000.0, 16: 100_000.0,
     21: 1200 / 3937 * 1000,  # US survey foot
 }
-UNIT_NAMES = {1: "inches", 2: "feet", 5: "centimetres", 6: "metres", 10: "yards"}
+UNIT_NAMES = {1: "inches", 2: "feet", 4: "millimetres", 5: "centimetres", 6: "metres", 10: "yards"}
+# What a student may pick on import ("I drew in ..."), as $INSUNITS codes. Architectural is inches.
+CHOSEN_UNITS = (1, 2, 4, 5, 6)
 # Entities made by expanding block references. Blocks can nest and MINSERT repeats them in a grid, so a
 # small file can ask for billions of copies. Real laser drawings need far fewer.
 MAX_BLOCK_ENTITIES = 10_000
@@ -176,12 +178,16 @@ def _paper_entities(doc: Drawing) -> list[DXFEntity]:
     return [e for layout in doc.layouts if layout.is_any_paperspace for e in layout if e.dxftype() != "VIEWPORT"]
 
 
-def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budget: PointBudget | None = None) -> list[Item]:
+def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budget: PointBudget | None = None,
+               units: int | None = None) -> list[Item]:
+    """`units`: the $INSUNITS code the student says they drew in, ahead of what the file claims."""
     budget = budget or PointBudget()
     doc, had_errors = read_doc(data)
     if had_errors:
         warnings.add("The DXF had errors. We fixed what we could, so check the preview carefully.")
-    units = doc.header.get("$INSUNITS", 0)
+    chosen = units in CHOSEN_UNITS
+    if not chosen:
+        units = doc.header.get("$INSUNITS", 0)
     scale = UNIT_MM.get(units)
     if scale is None:
         warnings.add("Unknown DXF units, so we're assuming millimetres.")
@@ -209,7 +215,12 @@ def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budg
     xs = [x for _, _, pts, _ in raw for x, _ in pts]
     ys = [y for _, _, pts, _ in raw for _, y in pts]
     size = max(max(xs) - min(xs), max(ys) - min(ys))
-    if size < TINY_MM:
+    if chosen and size < TINY_MM:
+        warnings.add(f"This DXF is only {size:.2g} mm across in {UNIT_NAMES[units]}. Select it and check Drawn in.")
+    elif chosen and size > HUGE_MM:
+        warnings.add(f"This DXF is {size:.0f} mm across in {UNIT_NAMES[units]}. If you drew in other units, select it "
+                     "and change Drawn in.")
+    elif size < TINY_MM:
         warnings.add(f"This DXF is only {size:.2g} mm across, so it was probably drawn in other units. In AutoCAD, "
                      "type UNITS and set Insertion scale to the units you drew in, then save again.")
     elif size > HUGE_MM and units in UNIT_NAMES:

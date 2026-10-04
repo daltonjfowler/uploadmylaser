@@ -154,6 +154,12 @@
 
       <details class="panel" id="partPanel" open hidden>
         <summary><h2>Selected part</h2></summary>
+        <label id="pUnitsRow" class="unitsrow" hidden data-hint="The units this DXF was drawn in. Changing it resizes the part.">Drawn in
+          <select id="pUnits">
+            <option value="4">Millimetres</option><option value="5">Centimetres</option><option value="6">Metres</option>
+            <option value="1">Inches (also Architectural)</option><option value="2">Feet</option>
+          </select>
+        </label>
         <label class="check" data-hint="Weld: overlapping shapes of the same colour become one outline. Good for cut-out names in joined-up fonts."><input type="checkbox" id="pWeld"> Weld overlapping shapes</label>
         <label class="check" data-hint="A Cut through line all the way around this part. Makes keychains, tags and stickers."><input type="checkbox" id="pOutline"> Cut an outline around it</label>
         <div class="indent">
@@ -182,6 +188,19 @@
   </main>
 
   <footer class="hint"><span id="hint"></span><span class="credit">Internal district tool. <a href="/teacher/">Teacher</a> <a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a> <a href="https://uploadmymodel.com" target="_blank" rel="noopener">uploadmymodel</a> <a href="https://uploadmycut.com" target="_blank" rel="noopener">uploadmycut</a> <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a> <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a> <a href="/legal" target="_blank" rel="noopener">Privacy &amp; legal</a> <a href="https://github.com/daltonjfowler/uploadmylaser" target="_blank" rel="noopener">Open source</a></span></footer>
+
+  <div id="unitsDlg" class="gate" hidden>
+    <form id="unitsForm" class="card">
+      <h2>What units did you draw in?</h2>
+      <p id="unitsInfo" class="muted small"></p>
+      <div id="unitsList" class="unitslist" role="radiogroup" aria-label="Drawing units"></div>
+      <p class="muted small">Not sure? In AutoCAD, type <b>UNITS</b>: <i>Architectural</i> and <i>Engineering</i> are inches. You can change this later under Selected part.</p>
+      <div class="row end">
+        <button type="button" id="unitsCancel">Cancel</button>
+        <button type="submit" class="go">Import</button>
+      </div>
+    </form>
+  </div>
 
   <div id="libraryDlg" class="gate" hidden>
     <div class="card wide">

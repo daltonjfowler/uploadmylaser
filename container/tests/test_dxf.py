@@ -307,3 +307,24 @@ def test_file_choice_does_not_touch_other_parts():
     res = process(ContainerJob(request=ProcessRequest(material_id="ply3", parts=parts), material=MAT, machine=M, files_b64=[data]))
     assert res.errors == []
     assert sorted((p.part, p.kind) for p in res.preview) == [(0, "score"), (1, "cut")]
+
+
+def test_student_units_win_over_the_file():
+    """Dalton 2026-10-04: ask which units the drawing was made in. Inches makes a 10-unit square 254 mm."""
+    doc = new(units=0)  # the file says nothing
+    doc.modelspace().add_lwpolyline([(0, 0), (10, 0), (10, 10), (0, 10)], close=True)
+    w = ImportWarnings()
+    items = import_dxf(dxf_bytes(doc), w, units=1)
+    xs = [x for it in items for x, _ in it.pts]
+    assert abs(max(xs) - min(xs) - 254) < 0.01
+    assert not any("no units" in m for m in w)
+    w2 = ImportWarnings()
+    items = import_dxf(dxf_bytes(doc), w2, units=4)  # mm
+    assert abs(max(x for it in items for x, _ in it.pts) - 10) < 0.01
+
+
+def test_file_units_used_when_nothing_chosen():
+    doc = new(units=1)
+    doc.modelspace().add_lwpolyline([(0, 0), (2, 0), (2, 2), (0, 2)], close=True)
+    items = import_dxf(dxf_bytes(doc), ImportWarnings())
+    assert abs(max(x for it in items for x, _ in it.pts) - 50.8) < 0.01

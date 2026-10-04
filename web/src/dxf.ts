@@ -19,12 +19,18 @@ export function bytesToBinaryString(b: Uint8Array): string {
   return s;
 }
 
+/** The $INSUNITS code an ASCII DXF claims (0: none), read straight from its header. */
+export function dxfUnitsCode(text: string): number {
+  const m = /\$INSUNITS\s*\r?\n\s*70\s*\r?\n\s*(\d+)/.exec(text.slice(0, 200_000));
+  return m ? Number(m[1]) : 0;
+}
+
 export function binaryStringToBytes(s: string): Uint8Array {
   return Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 }
 
 // $INSUNITS → mm (unitless counts as mm, like the server)
-const UNIT_MM: Record<number, number> = { 0: 1, 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 8: 0.0000254, 9: 0.0254, 10: 914.4, 13: 0.001, 14: 100 };
+export const UNIT_MM: Record<number, number> = { 0: 1, 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 8: 0.0000254, 9: 0.0254, 10: 914.4, 13: 0.001, 14: 100 };
 const MAX_POINTS = 200_000; // a sketch, not the job: stop drawing well before a Chromebook struggles
 const MAX_DEPTH = 8;
 

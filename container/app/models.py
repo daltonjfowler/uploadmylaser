@@ -82,6 +82,7 @@ class FilePart(Placement):
     file_index: int = Field(ge=0)
     file_type: Literal["svg", "dxf", "pbm"]  # pbm: a photo, already black and white dots
     color_map: dict[str, ColorChoice] = {}  # this file's own choices, ahead of ProcessRequest.color_map
+    dxf_units: Optional[Literal[1, 2, 4, 5, 6]] = None  # "I drew in" ($INSUNITS code), ahead of the file's own
 
 
 class TextPart(Placement):
