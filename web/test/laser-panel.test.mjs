@@ -103,3 +103,38 @@ test('some other remembered port is never picked on its own: the picker shows in
   assert.equal(choosePort([p(0x2341, 0x0043)], { vid: 0x1a86, pid: 0x7523 }), null);
   assert.equal(choosePort([], null), null);
 });
+
+test('Reset USB never hangs on a stuck write, and says when the port did not close', async () => {
+  const port = {
+    readable: new ReadableStream({ start() {} }),
+    writable: new WritableStream({ write: () => new Promise(() => {}) }), // the USB driver never finishes
+    open: async () => {},
+    close: () => new Promise(() => {}), // like Chrome waiting on a driver that never empties
+    getInfo: () => ({ usbVendorId: 0x0403 }),
+  };
+  Object.defineProperty(globalThis, 'navigator', { value: { serial: { getPorts: async () => [port], addEventListener() {}, removeEventListener() {} } }, configurable: true });
+  const l = new LaserLink({ baud: 115200, magic: M });
+  await l.connect();
+  void l.send(new Uint8Array(4096)).catch(() => {});
+  await new Promise((r) => setTimeout(r, 50));
+  const t = Date.now();
+  assert.equal(await l.hardClose(), false, 'reports the port as stuck');
+  assert.ok(Date.now() - t < 5000, 'gives up in time');
+  assert.equal(l.connected, false);
+});
+
+test('Reset USB closes a healthy port', async () => {
+  let closed = false;
+  const port = {
+    readable: new ReadableStream({ start() {} }),
+    writable: new WritableStream({ write() {} }),
+    open: async () => {},
+    close: async () => { closed = true; },
+    getInfo: () => ({ usbVendorId: 0x0403 }),
+  };
+  Object.defineProperty(globalThis, 'navigator', { value: { serial: { getPorts: async () => [port], addEventListener() {}, removeEventListener() {} } }, configurable: true });
+  const l = new LaserLink({ baud: 115200, magic: M });
+  await l.connect();
+  assert.equal(await l.hardClose(), true);
+  assert.equal(closed, true);
+});

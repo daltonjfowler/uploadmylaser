@@ -369,13 +369,27 @@ export class Workspace {
     return null;
   }
 
+  /**
+   * The part under the pointer. A big part's box covers the small parts inside it, so the topmost box was
+   * often the wrong part (Dalton 2026-10-05: small objects inside a floor plan could not be picked). Order:
+   * the part with a line under the pointer, then the part already selected (so dragging it still works),
+   * then the smallest box under the pointer.
+   */
   private partAt(mx: number, my: number): PartView | undefined {
     const pad = 3 / this.view.s; // thin designs are still easy to grab
-    for (let i = this.parts.length - 1; i >= 0; i--) {
-      const b = this.parts[i].box;
-      if (b && mx >= b[0] - pad && mx <= b[2] + pad && my >= b[1] - pad && my <= b[3] + pad) return this.parts[i];
+    const under = this.parts.filter(({ box: b }) => b && mx >= b[0] - pad && mx <= b[2] + pad && my >= b[1] - pad && my <= b[3] + pad);
+    if (under.length <= 1) return under[0];
+    let best: PartView | undefined;
+    let bestD = (6 + this.touchSlop) / this.view.s;
+    for (let i = under.length - 1; i >= 0; i--) { // topmost first, so it wins a tie
+      const d = lineDistance(under[i], mx, my, bestD);
+      if (d < bestD) [best, bestD] = [under[i], d];
     }
-    return undefined;
+    if (best) return best;
+    const sel = under.find((p) => p.id === this.selected || this.group.includes(p.id));
+    if (sel) return sel;
+    const area = (p: PartView) => (p.box![2] - p.box![0]) * (p.box![3] - p.box![1]);
+    return under.reduce((a, b) => (area(b) <= area(a) ? b : a));
   }
 
   private down = (e: PointerEvent) => {
@@ -1115,4 +1129,21 @@ function line(g: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y
   g.moveTo(x0, y0);
   g.lineTo(x1, y1);
   g.stroke();
+}
+
+/** How close (bed mm) the point is to any of the part's lines, giving up at `limit`. */
+function lineDistance(p: PartView, x: number, y: number, limit: number): number {
+  let best = limit;
+  for (const path of [...p.layers.flatMap((l) => l.paths), ...(p.unassigned ?? [])]) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const [ax, ay] = path[i];
+      const [bx, by] = path[i + 1];
+      if (Math.min(ax, bx) - best > x || Math.max(ax, bx) + best < x || Math.min(ay, by) - best > y || Math.max(ay, by) + best < y) continue;
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2)) : 0;
+      best = Math.min(best, Math.hypot(ax + t * dx - x, ay + t * dy - y));
+    }
+  }
+  return best;
 }

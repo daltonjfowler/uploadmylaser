@@ -249,6 +249,36 @@ export class LaserLink {
     }
   }
 
+  /**
+   * For Reset USB: close even when a write is stuck (hardware flow control can hold one forever, and then
+   * an ordinary close fails because the stream is still locked). Cancels the reader, aborts the writer,
+   * then closes the port. Never forgets the port. Never throws, never hangs: a write the USB driver never
+   * finishes cannot be ended from a web page (an abort waits for it), so each step has a time limit and the
+   * answer says whether the port really closed. False: unplug the cable or reload the page.
+   */
+  async hardClose(): Promise<boolean> {
+    const { port, writer, reader } = this;
+    this.reading = false;
+    this.abort = true;
+    this.port = null;
+    this.writer = null;
+    navigator.serial?.removeEventListener('disconnect', this.onDisconnect);
+    const within = <T>(p: Promise<T> | undefined, ms: number) =>
+      Promise.race([Promise.resolve(p).then(() => true, () => true), new Promise<boolean>((r) => setTimeout(() => r(false), ms))]);
+    await within(reader?.cancel(), 1000);
+    await within(writer?.abort(), 1000);
+    try {
+      writer?.releaseLock();
+    } catch {
+      /* still busy with the stuck write */
+    }
+    await new Promise((r) => setTimeout(r, 200)); // let the read loop let go
+    if (!port) return true;
+    let closed = false;
+    await within(port.close().then(() => { closed = true; }), 1500);
+    return closed;
+  }
+
   private cleanup(): void {
     this.reading = false;
     this.abort = true;

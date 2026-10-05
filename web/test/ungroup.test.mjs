@@ -49,3 +49,20 @@ test('the SVG is in mm from the piece corner, one path per colour', () => {
   assert.match(svg, /<path d="M5 2L10 2 10 7 5 7 5 2Z" fill="#0000ff"/);
   assert.match(svg, /<path d="M0 0L30 0 30 10 0 10 0 0Z" fill="none" stroke="#000000"/);
 });
+
+test('a floor plan of touching wall lines splits at the junctions instead of being one piece', () => {
+  // two rooms side by side sharing the middle wall: 7 lines, all touching
+  const L = (a, b) => ({ kind: 'cut', pts: [a, b] });
+  const plan = [
+    L([0, 0], [100, 0]), L([100, 0], [200, 0]), L([200, 0], [200, 80]), L([200, 80], [100, 80]),
+    L([100, 80], [0, 80]), L([0, 80], [0, 0]), L([100, 0], [100, 80]),
+  ];
+  const pieces = splitPieces(plan);
+  assert.ok(pieces.length >= 3, `only ${pieces.length} piece(s)`);
+  assert.equal(pieces.reduce((n, p) => n + p.lines.length, 0), 7, 'every line kept once');
+});
+
+test('a T of three lines splits into its three arms', () => {
+  const L = (a, b) => ({ kind: 'cut', pts: [a, b] });
+  assert.equal(splitPieces([L([0, 0], [50, 0]), L([50, 0], [100, 0]), L([50, 0], [50, 50])]).length, 3);
+});

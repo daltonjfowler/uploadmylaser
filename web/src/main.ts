@@ -14,7 +14,7 @@ import { ApiError, checkPhrase, convertDwg, getMachine, getMaterials, getPhrase,
 import { OP_COLORS, OP_LABELS, RUN_ORDER } from './ops';
 import { cleanPanelName } from './ruida/panel';
 import { fromBase64 } from './ruida/swizzle';
-import { LaserLink, type PortId } from './serial/laser';
+import { choosePort, LaserLink, type PortId } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
@@ -2588,6 +2588,35 @@ $('connect').onclick = async () => {
 };
 // Pick first, change the connection after: Cancel, or picking the port already open, leaves a working
 // connection alone (Dalton 2026-10-05: failsafes must never lose the right connection).
+// Reset USB: close everything and reopen the same remembered laser port. No picker, nothing forgotten,
+// the remembered port is not changed (Dalton 2026-10-05: failsafes must never lose the right connection).
+$('resetUsb').onclick = async () => {
+  if (!LaserLink.supported()) return warn('This browser cannot talk to USB devices. Use Chrome on a Chromebook.');
+  if (link?.sending && !confirm('A Send is still going. Reset stops it, and the laser may keep half a file. Send again before you press Start on the laser. Reset now?')) return;
+  const btn = $<HTMLButtonElement>('resetUsb');
+  btn.disabled = true;
+  try {
+    const freed = link ? await link.hardClose() : true;
+    setConnected(false);
+    if (!freed) return warn('The laser USB port is stuck. Unplug the laser USB cable and plug it back in (or reload the page), then press Connect laser.');
+    const port = choosePort(await navigator.serial.getPorts(), rememberedPort());
+    if (!port) return warn('No laser port is remembered on this computer yet. Press Connect laser.');
+    // left open by an earlier try that this page no longer holds: close it so it can open again
+    if (port.readable || port.writable) {
+      try {
+        await port.close();
+      } catch {
+        return warn('The laser port is still busy. Reload the page (Ctrl+R), or unplug the laser USB cable and plug it back in, then press Connect laser.');
+      }
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    await connectLaser('auto');
+    if (link?.connected) warn('USB connection reset. Laser connected.', '✓');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 $('pickPort').onclick = async () => {
   if (link?.sending) return warn('Wait for the Send to finish first.');
   let chosen: SerialPort;

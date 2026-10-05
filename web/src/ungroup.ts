@@ -47,10 +47,42 @@ function joinOpen(open: Line[]): Shape[] {
   });
   const groups = new Map<number, number[]>();
   open.forEach((_, i) => { const r = find(i); groups.set(r, [...(groups.get(r) ?? []), i]); });
-  return [...groups.values()].map((ids) => {
+  const out: Shape[] = [];
+  for (const ids of groups.values()) {
     const lines = ids.map((i) => open[i]);
-    return { lines, box: boxOf(lines.flatMap((l) => l.pts)), poly: loopOf(lines), area: 0 };
-  });
+    const loop = loopOf(lines);
+    // One outline (a box drawn as four lines) stays one piece. A web of touching lines, like a floor plan's
+    // walls, is split where three or more lines meet, or it would all be "one piece" (Dalton 2026-10-05).
+    for (const run of loop ? [lines] : runs(lines)) {
+      out.push({ lines: run, box: boxOf(run.flatMap((l) => l.pts)), poly: loop ?? loopOf(run), area: 0 });
+    }
+  }
+  return out;
+}
+
+/** Touching lines as runs between junctions (where 1 or 3+ line ends meet); closed loops stay whole. */
+function runs(lines: Line[]): Line[][] {
+  const at = new Map<string, Line[]>();
+  for (const l of lines) for (const k of [key(l.pts[0]), key(l.pts[l.pts.length - 1])]) at.set(k, [...(at.get(k) ?? []), l]);
+  const used = new Set<Line>();
+  const out: Line[][] = [];
+  const walk = (first: Line, from: string) => {
+    const run: Line[] = [];
+    let l: Line | undefined = first;
+    let node = from;
+    while (l && !used.has(l)) {
+      used.add(l);
+      run.push(l);
+      const [a, b] = [key(l.pts[0]), key(l.pts[l.pts.length - 1])];
+      node = a === node ? b : a;
+      const next: Line[] = at.get(node) ?? [];
+      l = next.length === 2 ? next.find((x) => !used.has(x)) : undefined; // carry on only through a plain corner
+    }
+    out.push(run);
+  };
+  for (const [node, ls] of at) if (ls.length !== 2) for (const l of ls) if (!used.has(l)) walk(l, node);
+  for (const l of lines) if (!used.has(l)) walk(l, key(l.pts[0])); // what is left are closed rings
+  return out;
 }
 
 /** Walk a group of open lines end to end. Null unless every end meets exactly one other end. */
