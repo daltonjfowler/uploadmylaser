@@ -55,3 +55,24 @@ test('a binary DXF survives being kept as a string', () => {
   const bytes = Uint8Array.from({ length: 70000 }, (_, i) => (i * 37) & 0xff);
   assert.deepEqual(binaryStringToBytes(bytesToBinaryString(bytes)), bytes);
 });
+
+// Dalton 2026-10-05: DXFs came in "boxy or with objects moved". Each fixture's sketch must sit where the
+// server (ezdxf, with exact block matrices) puts it. Boxes below are the server's, in drawing units.
+const fixture = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
+const boxOf = (sk) => [sk.vb.x, -sk.vb.y - sk.vb.h, sk.vb.x + sk.vb.w, -sk.vb.y];
+const sameBox = (got, want, msg) => got.forEach((v, i) => assert.ok(Math.abs(v - want[i]) < 0.2, `${msg}: ${got} vs ${want}`));
+
+test('splines follow the curve, not their control points; mirrored ellipses and splines stay put', () => {
+  // the old sketch drew the control polygon (down to y = -40) and threw mirrored ones ~1000 units away
+  sameBox(boxOf(sketchDxf(fixture('curves-mirrored.dxf'))), [400, 0, 600, 241.26], 'curves');
+});
+
+test('MINSERT draws every copy in its grid', () => {
+  const sk = sketchDxf(fixture('minsert.dxf'));
+  assert.equal(sk.d.split('M').length - 1, 12);
+  sameBox(boxOf(sk), [492, 92, 558, 198], 'grid');
+});
+
+test('a block in a rotated, unevenly scaled block lands where AutoCAD draws it', () => {
+  sameBox(boxOf(sketchDxf(fixture('nested-skew.dxf'))), [570.4, 281.13, 651.86, 378.45], 'skew');
+});

@@ -95,6 +95,55 @@ function bulgePts(vs: { x: number; y: number; b: number }[], closed: boolean): P
   return out;
 }
 
+/** A NURBS curve (degree, knots, control points, optional weights) sampled with de Boor's algorithm. */
+function nurbsPts(deg: number, knots: number[], ctrl: Pt[], weights: number[]): Pt[] | null {
+  const n = ctrl.length;
+  if (deg < 1 || n <= deg || knots.length !== n + deg + 1) return null;
+  const w = weights.length === n ? weights : ctrl.map(() => 1);
+  const [t0, t1] = [knots[deg], knots[n]];
+  if (!(t1 > t0)) return null;
+  const at = (t: number): Pt => {
+    let k = deg;
+    while (k < n - 1 && t >= knots[k + 1]) k++;
+    const d = Array.from({ length: deg + 1 }, (_, j) => {
+      const i = k - deg + j;
+      return [ctrl[i][0] * w[i], ctrl[i][1] * w[i], w[i]];
+    });
+    for (let r = 1; r <= deg; r++) {
+      for (let j = deg; j >= r; j--) {
+        const i = k - deg + j;
+        const den = knots[i + deg + 1 - r] - knots[i];
+        const a = den ? (t - knots[i]) / den : 0;
+        for (let c = 0; c < 3; c++) d[j][c] = (1 - a) * d[j - 1][c] + a * d[j][c];
+      }
+    }
+    const [x, y, h] = d[deg];
+    return h ? [x / h, y / h] : [x, y];
+  };
+  const steps = Math.min(2000, Math.max(16, (n - deg) * 24));
+  return Array.from({ length: steps + 1 }, (_, i) => at(t0 + ((t1 - t0) * i) / steps));
+}
+
+/** A smooth curve through fit points (centripetal Catmull-Rom): close to how CAD fits them, never straight. */
+function throughPts(fit: Pt[]): Pt[] {
+  if (fit.length < 3) return fit;
+  const out: Pt[] = [fit[0]];
+  const P = [fit[0], ...fit, fit[fit.length - 1]];
+  for (let i = 1; i + 2 < P.length; i++) {
+    const [p0, p1, p2, p3] = [P[i - 1], P[i], P[i + 1], P[i + 2]];
+    const tj = (a: Pt, b: Pt) => Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1])) || 1e-6;
+    const t1 = tj(p0, p1), t2 = t1 + tj(p1, p2), t3 = t2 + tj(p2, p3);
+    for (let k = 1; k <= 16; k++) {
+      const t = t1 + ((t2 - t1) * k) / 16;
+      const lerp = (a: Pt, b: Pt, ta: number, tb: number): Pt => [((tb - t) * a[0] + (t - ta) * b[0]) / (tb - ta), ((tb - t) * a[1] + (t - ta) * b[1]) / (tb - ta)];
+      const a1 = lerp(p0, p1, 0, t1), a2 = lerp(p1, p2, t1, t2), a3 = lerp(p2, p3, t2, t3);
+      const b1 = lerp(a1, a2, 0, t2), b2 = lerp(a2, a3, t1, t3);
+      out.push(lerp(b1, b2, t1, t2));
+    }
+  }
+  return out;
+}
+
 /** Group codes and values. Codes are on odd lines; a file that doesn't parse gives what it had so far. */
 function readTags(text: string): Tag[] {
   const lines = text.split(/\r\n|\r|\n/);
@@ -170,7 +219,10 @@ type Xf = (p: Pt) => Pt;
 /** One entity → polylines in its block's coordinates. */
 function shapes(e: Ent): Pt[][] {
   const t = e.tags;
-  const flip = num(t, 230, 1) < 0; // drawn with the UCS flipped (MIRROR does this): mirror x
+  // MIRROR in AutoCAD turns an object's extrusion to -Z. Objects stored in their own plane (OCS: circles,
+  // arcs, 2D polylines, solids) then read mirrored in x. LINE, SPLINE, ELLIPSE, 3D polylines and 3DFACE
+  // are stored in world coordinates already, so they must NOT be flipped (that moved them across the drawing).
+  const flip = num(t, 230, 1) < 0;
   const f = (ps: Pt[]): Pt[] => (flip ? ps.map(([x, y]) => [-x, y]) : ps);
   switch (e.type) {
     case 'LINE':
@@ -189,36 +241,44 @@ function shapes(e: Ent): Pt[][] {
       return [f(bulgePts(vs, (num(t, 70) & 1) === 1))];
     }
     case 'POLYLINE': {
+      const flags = num(t, 70);
       const vs = (e.verts ?? []).filter((v) => !(num(v, 70) & 128)) // skip mesh face records
         .map((v) => ({ x: num(v, 10), y: num(v, 20), b: num(v, 42) }));
-      return [f(bulgePts(vs, (num(t, 70) & 1) === 1))];
+      const pts = bulgePts(vs, (flags & 1) === 1);
+      return [flags & (8 | 16 | 64) ? pts : f(pts)]; // 3D polylines and meshes are in world coordinates
     }
     case 'ELLIPSE': {
       const [cx, cy, mx, my, ratio] = [num(t, 10), num(t, 20), num(t, 11), num(t, 21), num(t, 40, 1)];
       let [a0, a1] = [num(t, 41), num(t, 42, Math.PI * 2)];
       while (a1 <= a0) a1 += Math.PI * 2;
-      const n = 64;
-      const pts = Array.from({ length: n + 1 }, (_, i) => {
+      // minor axis = extrusion x major axis: turned the other way when the extrusion is -Z
+      const [nx, ny] = flip ? [my * ratio, -mx * ratio] : [-my * ratio, mx * ratio];
+      const n = Math.max(16, Math.ceil(((a1 - a0) / (Math.PI * 2)) * 96));
+      return [Array.from({ length: n + 1 }, (_, i) => {
         const a = a0 + ((a1 - a0) * i) / n;
-        const [c, s] = [Math.cos(a), Math.sin(a) * ratio];
-        return [cx + mx * c - my * s, cy + my * c + mx * s] as Pt;
-      });
-      return [f(pts)];
+        return [cx + mx * Math.cos(a) + nx * Math.sin(a), cy + my * Math.cos(a) + ny * Math.sin(a)] as Pt;
+      })];
     }
     case 'SPLINE': {
       const fit: Pt[] = [];
       const ctrl: Pt[] = [];
-      for (let i = 0; i + 1 < t.length; i++) {
-        if (t[i][0] === 11 && t[i + 1][0] === 21) fit.push([Number(t[i][1]), Number(t[i + 1][1])]);
-        if (t[i][0] === 10 && t[i + 1][0] === 20) ctrl.push([Number(t[i][1]), Number(t[i + 1][1])]);
+      const knots: number[] = [];
+      const weights: number[] = [];
+      for (let i = 0; i < t.length; i++) {
+        const [c, v] = t[i];
+        if (c === 11 && t[i + 1]?.[0] === 21) fit.push([Number(v), Number(t[i + 1][1])]);
+        else if (c === 10 && t[i + 1]?.[0] === 20) ctrl.push([Number(v), Number(t[i + 1][1])]);
+        else if (c === 40) knots.push(Number(v));
+        else if (c === 41) weights.push(Number(v));
       }
-      return [f(fit.length > 1 ? fit : ctrl)];
+      const curve = ctrl.length > 1 ? nurbsPts(num(t, 71, 3), knots, ctrl, weights) : null;
+      return [curve ?? (fit.length > 1 ? throughPts(fit) : ctrl)];
     }
     case 'SOLID':
     case 'TRACE':
     case '3DFACE': {
       const q: Pt[] = [[num(t, 10), num(t, 20)], [num(t, 11), num(t, 21)], [num(t, 13), num(t, 23)], [num(t, 12), num(t, 22)]];
-      return [f([...q, q[0]])];
+      return [e.type === '3DFACE' ? [...q, q[0]] : f([...q, q[0]])];
     }
     default:
       return [];
@@ -243,11 +303,18 @@ function outlines(doc: Doc, ents: Ent[]): Pt[][] {
         const r = (num(e.tags, 50) * Math.PI) / 180;
         const mirror = num(e.tags, 230, 1) < 0 ? -1 : 1;
         const [c, s] = [Math.cos(r), Math.sin(r)];
-        const inner: Xf = ([x, y]) => {
-          const [u, v] = [(x - b.base[0]) * sx, (y - b.base[1]) * sy];
-          return xf([mirror * (px + u * c - v * s), py + u * s + v * c]);
-        };
-        walk(b.ents, inner, depth + 1, layer);
+        // MINSERT: a grid of copies, spaced in the insert's own (rotated) directions
+        const [cols, rows] = [Math.max(1, Math.min(100, num(e.tags, 70, 1))), Math.max(1, Math.min(100, num(e.tags, 71, 1)))];
+        const [cs, rs] = [num(e.tags, 44), num(e.tags, 45)];
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            const inner: Xf = ([x, y]) => {
+              const [u, v] = [(x - b.base[0]) * sx + col * cs, (y - b.base[1]) * sy + row * rs];
+              return xf([mirror * (px + u * c - v * s), py + u * s + v * c]);
+            };
+            walk(b.ents, inner, depth + 1, layer);
+          }
+        }
         continue;
       }
       for (const p of shapes(e)) {

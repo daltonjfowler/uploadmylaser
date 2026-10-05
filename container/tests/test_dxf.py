@@ -3,6 +3,7 @@ came in as a blank part showing only its file name. A DXF must either show its l
 AutoCAD, never a silent blank part."""
 import base64
 import io
+import math
 
 import ezdxf
 import pytest
@@ -328,3 +329,32 @@ def test_file_units_used_when_nothing_chosen():
     doc.modelspace().add_lwpolyline([(0, 0), (2, 0), (2, 2), (0, 2)], close=True)
     items = import_dxf(dxf_bytes(doc), ImportWarnings())
     assert abs(max(x for it in items for x, _ in it.pts) - 50.8) < 0.01
+
+
+def test_block_inside_a_rotated_unevenly_scaled_block_is_exact():
+    """Dalton 2026-10-05, "objects moved": ezdxf's virtual entities approximated this skew by 5-9 mm."""
+    doc = new()
+    part = doc.blocks.new("PART", base_point=(10, 5))
+    part.add_lwpolyline([(0, 0), (40, 0), (40, 20), (0, 20)], close=True)
+    doc.blocks.new("OUTER").add_blockref("PART", (100, 0), dxfattribs={"rotation": 30, "xscale": 2, "yscale": 1.5})
+    doc.modelspace().add_blockref("OUTER", (500, 200), dxfattribs={"rotation": 45, "xscale": 1.5, "yscale": 0.8})
+    items = import_dxf(dxf_bytes(doc), ImportWarnings())
+    xs = [x for it in items for x, _ in it.pts]
+    ys = [y for it in items for _, y in it.pts]
+    assert abs((max(xs) - min(xs)) - (651.86 - 570.40)) < 0.02  # the true corners, worked out by hand
+    assert abs((max(ys) - min(ys)) - (378.45 - 281.13)) < 0.02
+
+
+def test_scaled_up_circles_stay_round():
+    """Dalton 2026-10-05, "boxy": curves were flattened before the part was scaled, so 20x scale meant 20x
+    bigger steps. Every chord's midpoint must stay within 0.05 mm of the true circle on the bed."""
+    doc = new()
+    doc.modelspace().add_circle((0, 0), 2)
+    job = ContainerJob(request=ProcessRequest(material_id="ply3", parts=[FilePart(file_index=0, file_type="dxf", x_mm=200, y_mm=10, scale=20)]),
+                       material=MAT, machine=M, files_b64=[base64.b64encode(dxf_bytes(doc)).decode()])
+    res = process(job)
+    pts = [p for layer in res.preview for path in layer.paths for p in path]
+    cx = (max(x for x, _ in pts) + min(x for x, _ in pts)) / 2
+    cy = (max(y for _, y in pts) + min(y for _, y in pts)) / 2
+    worst = max(40 - math.hypot((a[0] + b[0]) / 2 - cx, (a[1] + b[1]) / 2 - cy) for a, b in zip(pts, pts[1:]))
+    assert worst < 0.06, worst

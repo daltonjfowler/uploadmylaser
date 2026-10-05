@@ -17,7 +17,7 @@ from ezdxf import disassemble, recover
 from ezdxf.document import Drawing
 from ezdxf.entities import DXFEntity, Insert
 from ezdxf.lldxf.tagger import binary_tags_loader
-from ezdxf.math import BoundingBox
+from ezdxf.math import BoundingBox, Matrix44
 from ezdxf.protocols import SupportsVirtualEntities, virtual_entities
 
 from . import ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
@@ -122,10 +122,15 @@ def _style(doc: Drawing, entity: DXFEntity, parent: Optional[Style]) -> Style:
 
 
 def _decompose(doc: Drawing, entities: Iterable[DXFEntity], made: list[int], parent: Optional[Style] = None,
-               nested: bool = False) -> Iterator[tuple[DXFEntity, Style]]:
-    """ezdxf's recursive_decompose, counting every entity a block reference expands into, and carrying the
-    block reference's layer and colour down. Plain entities in the drawing itself are already limited by the
-    upload size and the point budget. Dimensions are not expanded: their lines are notes, not parts."""
+               nested: bool = False, m: Optional[Matrix44] = None) -> Iterator[tuple[DXFEntity, Style, Optional[Matrix44]]]:
+    """Every drawable entity with the matrix that takes it from its block to the drawing (None: already there),
+    counting every entity a block reference expands into and carrying the block reference's layer and colour
+    down. Plain entities in the drawing itself are already limited by the upload size and the point budget.
+    Dimensions are not expanded: their lines are notes, not parts.
+
+    Block references are expanded with one exact matrix per level, multiplied together, instead of ezdxf's
+    virtual entities: those approximate a block inside a rotated, unevenly scaled block (a skew), which put
+    doors and windows several mm away from where AutoCAD draws them (Dalton, 2026-10-05)."""
     for entity in entities:
         if nested:
             made[0] += 1
@@ -134,15 +139,18 @@ def _decompose(doc: Drawing, entities: Iterable[DXFEntity], made: list[int], par
         style = _style(doc, entity, parent)
         kind = entity.dxftype()
         if isinstance(entity, Insert):
-            if entity.mcount > 1:
-                yield from _decompose(doc, entity.multi_insert(), made, parent, True)
-            else:
-                yield from ((a, style) for a in entity.attribs)
-                yield from _decompose(doc, virtual_entities(entity), made, style, True)
+            copies = entity.multi_insert() if entity.mcount > 1 else [entity]
+            yield from ((a, style, m) for a in entity.attribs)  # in the parent's coordinates
+            for ref in copies:
+                block = ref.block()
+                if block is None:
+                    continue
+                inner = ref.matrix44() if m is None else ref.matrix44() @ m
+                yield from _decompose(doc, block, made, style, True, inner)
         elif kind not in NOTES and isinstance(entity, SupportsVirtualEntities):
-            yield from _decompose(doc, virtual_entities(entity), made, style, True)
+            yield from _decompose(doc, virtual_entities(entity), made, style, True, m)
         else:
-            yield entity, style
+            yield entity, style, m
 
 
 def _skip_reason(kind: str) -> Optional[str]:
@@ -235,7 +243,7 @@ def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budg
 def _collect(doc: Drawing, entities: Iterable[DXFEntity], scale: float, tol_mm: float, budget: PointBudget,
              skipped: set[str]) -> list[tuple[str, Optional[str], list[Pt], bool]]:
     raw: list[tuple[str, Optional[str], list[Pt], bool]] = []
-    for ent, style in _decompose(doc, entities, [0]):
+    for ent, style, m in _decompose(doc, entities, [0]):
         kind = ent.dxftype()
         reason = _skip_reason(kind)
         if kind in IGNORED:
@@ -249,13 +257,14 @@ def _collect(doc: Drawing, entities: Iterable[DXFEntity], scale: float, tol_mm: 
             continue
         for prim in disassemble.to_primitives([ent]):
             if prim.path is not None:
-                box = BoundingBox(prim.path.control_vertices())
+                path = prim.path if m is None else prim.path.transform(m)
+                box = BoundingBox(path.control_vertices())
                 size = max(box.size.x, box.size.y) if box.has_data else 0.0
                 if not math.isfinite(size):
                     raise ValueError("DXF coordinates are not finite")
-                vs = list(prim.path.flattening(distance=max(tol_mm / scale, size * RELATIVE_TOLERANCE)))
+                vs = list(path.flattening(distance=max(tol_mm / scale, size * RELATIVE_TOLERANCE)))
             else:
-                vs = list(prim.vertices())
+                vs = list(prim.vertices()) if m is None else list(m.transform_vertices(prim.vertices()))
             budget.take(len(vs))
             if len(vs) < 2:
                 continue

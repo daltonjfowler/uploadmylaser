@@ -19,6 +19,9 @@ DEFAULT_HATCH_MM = 0.1
 VERB = {"cut": "cut through", "score": "marked", "engrave": "engraved"}
 
 
+TOL_MM = 0.05  # how far a flattened curve may stray from the true one, on the bed
+
+
 def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings, budget: PointBudget) -> list[Item]:
     """One part's Items in its own coordinates. Raises ValueError with a friendly message. `n` is 1-based."""
     if part.kind == "text":
@@ -43,15 +46,18 @@ def _import_part(job: ContainerJob, part: Part, n: int, warnings: ImportWarnings
         data = base64.b64decode(job.files_b64[part.file_index], validate=True)
     except (binascii.Error, ValueError) as e:
         raise ValueError(f'The file for "part {n}" got damaged on upload. Try again.') from e
+    # Curves are flattened before the part is scaled, so a part sized up 25x would show 25x bigger steps
+    # (boxy circles, Dalton 2026-10-05). Flatten finer by the scale, so the cut is still within 0.05 mm.
+    tol = TOL_MM / max(1.0, part.scale, part.scale_y or part.scale)
     try:
         if part.file_type == "pbm":
             from .geometry.photo_import import import_photo
             return import_photo(data, warnings, budget=budget)
         if part.file_type == "svg":
             from .geometry.svg_import import import_svg
-            return import_svg(data, warnings, budget=budget)
+            return import_svg(data, warnings, tol_mm=tol, budget=budget)
         from .geometry.dxf_import import import_dxf
-        return import_dxf(data, warnings, budget=budget, units=part.dxf_units)
+        return import_dxf(data, warnings, tol_mm=tol, budget=budget, units=part.dxf_units)
     except TooDetailed:
         raise
     except ImportProblem as e:  # read fine, but nothing we can laser: say what to change
