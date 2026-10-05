@@ -37,7 +37,7 @@ $('connect').onclick = async () => {
       onReceive: (b) => log(`RX ${b.length}B raw: ${hex(b)}  | unswizzled: ${hex(unswizzle(b, magic()))}`),
       onDisconnect: () => { log('USB disconnected'); setConnected(false); },
     });
-    await link.connect($<HTMLInputElement>('showAll').checked);
+    await link.connect($<HTMLInputElement>('showAll').checked ? 'all' : 'auto');
     const i = link.info;
     $('portInfo').textContent = `VID ${i?.usbVendorId?.toString(16)} PID ${i?.usbProductId?.toString(16)}`;
     log(`Connected: ${$('portInfo').textContent}, baud ${$<HTMLSelectElement>('baud').value}, flow ${$<HTMLSelectElement>('flow').value}`);

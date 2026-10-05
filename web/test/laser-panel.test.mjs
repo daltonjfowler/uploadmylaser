@@ -81,3 +81,25 @@ test('a bad name is refused before anything is written', async () => {
 test('the fake controller replies parse (sanity check for this file)', () => {
   assert.equal(parseReplies(Uint8Array.of(0xda, 0x01, 0x04, 0x05, 0, 0, 0, 0, 2)).replies[0].value, 2);
 });
+
+// Dalton 2026-10-05: the USB picker "never showed again". Any remembered port used to be reused, so a
+// wrong one picked once stuck. choosePort only reuses the port that worked, or the one FTDI port.
+const { choosePort } = await import('../src/serial/laser.ts');
+const p = (vid, pid) => ({ vid, pid, getInfo: () => ({ usbVendorId: vid, usbProductId: pid }) });
+
+test('the port that worked last time is reused', () => {
+  const laser = p(0x1a86, 0x7523);
+  assert.equal(choosePort([p(0x0403, 0x6001), laser], { vid: 0x1a86, pid: 0x7523 }), laser);
+});
+
+test('with nothing remembered, only a single FTDI port is reused', () => {
+  const ftdi = p(0x0403, 0x6001);
+  assert.equal(choosePort([p(0x2341, 0x0043), ftdi], null), ftdi);
+  assert.equal(choosePort([p(0x0403, 0x6001), p(0x0403, 0x6015)], null), null); // two: ask
+});
+
+test('some other remembered port is never picked on its own: the picker shows instead', () => {
+  assert.equal(choosePort([p(0x2341, 0x0043)], null), null);
+  assert.equal(choosePort([p(0x2341, 0x0043)], { vid: 0x1a86, pid: 0x7523 }), null);
+  assert.equal(choosePort([], null), null);
+});

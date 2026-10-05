@@ -11,7 +11,25 @@ import {
 export const FTDI_FILTER: SerialPortFilter = { usbVendorId: 0x0403 };
 const CHUNK = 512;
 const REPLY_MS = 1500;
-const NO_REPLY = 'The laser did not answer when asked for its file list. Check the cable, or ask your teacher to turn off "Send to panel".';
+const NO_REPLY = 'The laser did not answer when asked for its file list. Check the cable, press Choose USB port… in case it is the wrong port, or ask your teacher to turn off "Send to panel".';
+
+/** A USB port by its vendor and product id. */
+export interface PortId { vid: number; pid: number | null }
+
+/**
+ * The remembered port to open without asking, or null to show the picker: the one that worked last
+ * time, else the only FTDI port. Never just "the first port Chrome remembers": that was how a wrong
+ * port picked once got reused forever. Exported for tests.
+ */
+export function choosePort<P extends { getInfo(): SerialPortInfo }>(granted: P[], remembered: PortId | null): P | null {
+  const id = (p: P) => p.getInfo();
+  if (remembered) {
+    const same = granted.filter((p) => id(p).usbVendorId === remembered.vid && (remembered.pid === null || id(p).usbProductId === remembered.pid));
+    if (same.length === 1) return same[0];
+  }
+  const ftdi = granted.filter((p) => id(p).usbVendorId === FTDI_FILTER.usbVendorId);
+  return ftdi.length === 1 ? ftdi[0] : null;
+}
 
 export interface LinkOptions {
   baud: number;
@@ -50,15 +68,28 @@ export class LaserLink {
     return this.port?.getInfo() ?? null;
   }
 
-  /** Reuse a previously granted port if there is one, otherwise show Chrome's picker. */
-  async connect(showAll = false): Promise<void> {
+  /** Which port is open, to remember for next time (null: none, or Chrome does not say). */
+  get portId(): PortId | null {
+    const i = this.port?.getInfo();
+    return i?.usbVendorId !== undefined ? { vid: i.usbVendorId, pid: i.usbProductId ?? null } : null;
+  }
+
+  /**
+   * Open the laser's port. `pick`: 'auto' reuses the port that worked last time (or the one FTDI port Chrome
+   * remembers) and shows Chrome's picker otherwise; 'all' always shows the picker with every USB port and
+   * makes Chrome forget the others, so a wrong port picked once can never come back on its own (Dalton
+   * 2026-10-05: the picker "never showed again" because any remembered port was reused).
+   */
+  async connect(pick: 'auto' | 'filtered' | 'all' = 'auto', remembered?: PortId | null): Promise<void> {
     if (!LaserLink.supported()) throw new Error('This browser cannot talk to USB devices. Use Chrome on a Chromebook.');
-    // Any port granted before counts, since it may have been picked from the show-all list.
     const granted = await navigator.serial.getPorts();
-    const port =
-      granted.find((p) => p.getInfo().usbVendorId === FTDI_FILTER.usbVendorId) ??
-      granted[0] ??
-      (await navigator.serial.requestPort(showAll ? {} : { filters: [FTDI_FILTER] }));
+    let port = pick === 'auto' ? choosePort(granted, remembered ?? null) : null;
+    if (!port) {
+      port = await navigator.serial.requestPort(pick === 'all' ? {} : { filters: [FTDI_FILTER] });
+      if (pick === 'all') {
+        for (const other of granted) if (other !== port) await other.forget?.().catch(() => {});
+      }
+    }
     try {
       await port.open({ baudRate: this.opts.baud, flowControl: this.opts.flowControl ?? 'hardware', bufferSize: 4096 });
     } catch (e) {

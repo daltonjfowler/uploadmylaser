@@ -14,7 +14,7 @@ import { ApiError, checkPhrase, convertDwg, getMachine, getMaterials, getPhrase,
 import { OP_COLORS, OP_LABELS, RUN_ORDER } from './ops';
 import { cleanPanelName } from './ruida/panel';
 import { fromBase64 } from './ruida/swizzle';
-import { LaserLink } from './serial/laser';
+import { LaserLink, type PortId } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
@@ -2548,6 +2548,35 @@ function fmtTime(s: number): string {
 // ---------- laser ----------
 
 let pickerCancelled = false;
+const PORT_KEY = 'uml.laserPort';
+
+function rememberedPort(): PortId | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(PORT_KEY) ?? 'null');
+    return v && typeof v.vid === 'number' ? { vid: v.vid, pid: typeof v.pid === 'number' ? v.pid : null } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function connectLaser(pick: 'auto' | 'filtered' | 'all'): Promise<void> {
+  if (link?.connected) await link.disconnect();
+  try {
+    link = new LaserLink({ baud: machine.baud, magic: machine.swizzleMagic, onDisconnect: () => setConnected(false) });
+    await link.connect(pick, rememberedPort());
+    pickerCancelled = false;
+    try { if (link.portId) localStorage.setItem(PORT_KEY, JSON.stringify(link.portId)); } catch { /* fine */ }
+    setConnected(true);
+  } catch (e) {
+    setConnected(false);
+    if ((e as Error).name === 'NotFoundError') {
+      // Picker cancelled, maybe because the laser wasn't listed. Next click shows every port.
+      if (!pickerCancelled) warn('Laser not in the list? Press Choose USB port… to see every USB port.');
+      pickerCancelled = true;
+    } else warn(`${(e as Error).message} Or press Choose USB port… to pick the laser again.`);
+    render();
+  }
+}
 
 $('connect').onclick = async () => {
   if (link?.connected) {
@@ -2555,23 +2584,14 @@ $('connect').onclick = async () => {
     setConnected(false);
     return;
   }
-  try {
-    link = new LaserLink({ baud: machine.baud, magic: machine.swizzleMagic, onDisconnect: () => setConnected(false) });
-    await link.connect(pickerCancelled);
-    pickerCancelled = false;
-    setConnected(true);
-  } catch (e) {
-    if ((e as Error).name === 'NotFoundError') {
-      // Picker cancelled, maybe because the laser wasn't listed. Next click shows every port.
-      if (!pickerCancelled) notes = ['Laser not in the list? Press Connect laser again to see every USB port.'];
-      pickerCancelled = true;
-    } else notes = [(e as Error).message];
-    render();
-  }
+  await connectLaser(pickerCancelled ? 'all' : 'auto');
 };
+$('pickPort').onclick = () => void connectLaser('all');
 
 function setConnected(on: boolean): void {
   $('status').textContent = on ? 'Laser connected' : 'Laser not connected';
+  const id = on ? link?.portId : null;
+  $('status').title = id ? `USB ${id.vid.toString(16).padStart(4, '0')}:${(id.pid ?? 0).toString(16).padStart(4, '0')}` : '';
   $('status').classList.toggle('ok', on);
   $('connect').textContent = on ? 'Disconnect' : 'Connect laser';
   $('stop').hidden = !on;
