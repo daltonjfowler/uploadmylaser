@@ -68,6 +68,16 @@ export class LaserLink {
     return this.port?.getInfo() ?? null;
   }
 
+  /** Chrome's picker with every USB port. Throws NotFoundError when cancelled. Opens nothing. */
+  static pick(): Promise<SerialPort> {
+    if (!LaserLink.supported()) return Promise.reject(new Error('This browser cannot talk to USB devices. Use Chrome on a Chromebook.'));
+    return navigator.serial.requestPort({});
+  }
+
+  isPort(p: SerialPort): boolean {
+    return this.port === p;
+  }
+
   /** Which port is open, to remember for next time (null: none, or Chrome does not say). */
   get portId(): PortId | null {
     const i = this.port?.getInfo();
@@ -76,20 +86,15 @@ export class LaserLink {
 
   /**
    * Open the laser's port. `pick`: 'auto' reuses the port that worked last time (or the one FTDI port Chrome
-   * remembers) and shows Chrome's picker otherwise; 'all' always shows the picker with every USB port and
-   * makes Chrome forget the others, so a wrong port picked once can never come back on its own (Dalton
-   * 2026-10-05: the picker "never showed again" because any remembered port was reused).
+   * remembers) and shows Chrome's picker otherwise; 'all' always shows the picker with every USB port.
+   * Nothing is ever forgotten (Dalton 2026-10-05: a failed or wrong pick must not lose the right port);
+   * the caller remembers a port only once it has opened.
    */
-  async connect(pick: 'auto' | 'filtered' | 'all' = 'auto', remembered?: PortId | null): Promise<void> {
+  async connect(pick: 'auto' | 'filtered' | 'all' = 'auto', remembered?: PortId | null, chosen?: SerialPort): Promise<void> {
     if (!LaserLink.supported()) throw new Error('This browser cannot talk to USB devices. Use Chrome on a Chromebook.');
     const granted = await navigator.serial.getPorts();
-    let port = pick === 'auto' ? choosePort(granted, remembered ?? null) : null;
-    if (!port) {
-      port = await navigator.serial.requestPort(pick === 'all' ? {} : { filters: [FTDI_FILTER] });
-      if (pick === 'all') {
-        for (const other of granted) if (other !== port) await other.forget?.().catch(() => {});
-      }
-    }
+    const port = chosen ?? (pick === 'auto' ? choosePort(granted, remembered ?? null) : null)
+      ?? (await navigator.serial.requestPort(pick === 'all' ? {} : { filters: [FTDI_FILTER] }));
     try {
       await port.open({ baudRate: this.opts.baud, flowControl: this.opts.flowControl ?? 'hardware', bufferSize: 4096 });
     } catch (e) {

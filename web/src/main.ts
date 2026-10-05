@@ -2559,11 +2559,11 @@ function rememberedPort(): PortId | null {
   }
 }
 
-async function connectLaser(pick: 'auto' | 'filtered' | 'all'): Promise<void> {
+async function connectLaser(pick: 'auto' | 'filtered' | 'all', chosen?: SerialPort): Promise<void> {
   if (link?.connected) await link.disconnect();
   try {
     link = new LaserLink({ baud: machine.baud, magic: machine.swizzleMagic, onDisconnect: () => setConnected(false) });
-    await link.connect(pick, rememberedPort());
+    await link.connect(pick, rememberedPort(), chosen);
     pickerCancelled = false;
     try { if (link.portId) localStorage.setItem(PORT_KEY, JSON.stringify(link.portId)); } catch { /* fine */ }
     setConnected(true);
@@ -2586,7 +2586,20 @@ $('connect').onclick = async () => {
   }
   await connectLaser(pickerCancelled ? 'all' : 'auto');
 };
-$('pickPort').onclick = () => void connectLaser('all');
+// Pick first, change the connection after: Cancel, or picking the port already open, leaves a working
+// connection alone (Dalton 2026-10-05: failsafes must never lose the right connection).
+$('pickPort').onclick = async () => {
+  if (link?.sending) return warn('Wait for the Send to finish first.');
+  let chosen: SerialPort;
+  try {
+    chosen = await LaserLink.pick();
+  } catch (e) {
+    if ((e as Error).name !== 'NotFoundError') warn((e as Error).message);
+    return; // cancelled: nothing changes
+  }
+  if (link?.connected && link.isPort(chosen)) return warn('That port is already connected.', '✓');
+  await connectLaser('all', chosen);
+};
 
 function setConnected(on: boolean): void {
   $('status').textContent = on ? 'Laser connected' : 'Laser not connected';
