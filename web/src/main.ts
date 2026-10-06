@@ -899,27 +899,99 @@ function trimClick(mx: number, my: number, tol: number): void {
     changed();
     return;
   }
-  const box = boundsOf(keep.map((l) => l.pts));
+  bakeLines(p, keep, '(trimmed)');
+  changed();
+  cacheBaked(p);
+}
+
+/** Turn a part into a plain drawing of `lines` (bed mm), in place. It keeps its id (so its selection and
+ *  group stay); weld and outline are already in the lines. Used by Trim and by Rotate at any angle. Call
+ *  changed() and then cacheBaked() after. */
+function bakeLines(p: DesignPart, lines: TrimLine[], tag: string): void {
+  const box = boundsOf(lines.map((l) => l.pts));
   const s = p.source;
   const was = s.kind === 'text' ? s.text.value.split('\n')[0] : s.kind === 'shape' ? (s.shape === 'box' ? 'Box' : 'Circle') : s.name;
-  const name = /\(trimmed\)$/.test(was) ? was : `${was.replace(/\.(dxf|svg)$/i, '')} (trimmed)`;
-  const data = pieceSvg({ lines: keep, box });
-  // the part keeps its id (so its selection and group stay) but becomes a plain drawing of what is left;
-  // weld and outline are already in these lines
-  p.source = { kind: 'file', name, fileType: 'svg', data };
+  const base = was.replace(/ \((trimmed|rotated)\)$/, '').replace(/\.(dxf|svg)$/i, '');
+  const data = pieceSvg({ lines, box });
+  p.source = { kind: 'file', name: `${base} ${tag}`, fileType: 'svg', data };
   Object.assign(p, { xMm: round(box[2]), yMm: round(box[1]), scale: 1, rotateDeg: 0 });
-  for (const f of ['scaleY', 'flipX', 'flipY', 'weld', 'outline'] as const) delete p[f];
+  for (const f of ['scaleY', 'flipX', 'flipY', 'weld', 'outline', 'closeGaps'] as const) delete p[f];
   dropLocal(p.id);
-  const kinds = RUN_ORDER.filter((kind) => keep.some((l) => l.kind === kind));
+  const kinds = RUN_ORDER.filter((kind) => lines.some((l) => l.kind === kind));
   knownColors.set(data, kinds.map((kind) => ({ key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind })));
-  const layers = kinds.map((kind) => ({ kind, paths: keep.filter((l) => l.kind === kind).map((l) => l.pts) }));
+  const layers = kinds.map((kind) => ({ kind, paths: lines.filter((l) => l.kind === kind).map((l) => l.pts) }));
+  const i = resultIds.indexOf(p.id);
   if (result && i >= 0) { // show it at once; the server's answer replaces it
     result.preview = [...result.preview.filter((l) => l.part !== i), ...layers.map((l) => ({ ...l, part: i }))];
     result.partBoxes[i] = box;
   }
-  changed();
-  viewCache.set(partSig(p, sigCtx()), { id: p.id, box, layers });
+  baked.set(p.id, { box, layers });
 }
+
+const baked = new Map<number, { box: Box; layers: PartView['layers'] }>();
+/** After changed(): remember the baked parts' lines under their new signature (for Undo/Redo and a busy server). */
+function cacheBaked(...ps: DesignPart[]): void {
+  for (const p of ps) {
+    const b = baked.get(p.id);
+    if (b) viewCache.set(partSig(p, sigCtx()), { id: p.id, ...b });
+    baked.delete(p.id);
+  }
+}
+
+// ---------- rotate by any angle ----------
+
+/** Turn the selection by `deg` (+ is counter-clockwise, like AutoCAD) around its middle. Quarter turns keep
+ *  each part as it is (text stays text); other angles turn the laser lines and keep them as a drawing. */
+function rotateBy(deg: number): void {
+  const ps = selection().map(find).filter((q): q is DesignPart => !!q);
+  if (!ps.length || !Number.isFinite(deg)) return;
+  const turn = ((Math.round(deg * 1000) / 1000) % 360 + 360) % 360;
+  if (turn === 0) return;
+  const views = ps.map(viewOf);
+  if (views.some((v) => !v.box)) return warn('Wait a moment for the laser lines, then rotate again.');
+  const all = unionBox(views.map((v) => v.box))!;
+  const [cx, cy] = [(all[0] + all[2]) / 2, (all[1] + all[3]) / 2];
+  const a = (turn * Math.PI) / 180;
+  const [c, s] = [Math.cos(a), Math.sin(a)];
+  // y points down on the bed, so this is counter-clockwise on screen
+  const spin = ([x, y]: [number, number]): [number, number] => [cx + (x - cx) * c + (y - cy) * s, cy - (x - cx) * s + (y - cy) * c];
+  if (turn % 90 === 0) {
+    const q = turn / 90; // counter-clockwise quarter turns; rotateDeg counts clockwise
+    for (const [k, p] of ps.entries()) {
+      const b = views[k].box!;
+      const [mx, my] = spin([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]);
+      const [w, h] = q % 2 ? [b[3] - b[1], b[2] - b[0]] : [b[2] - b[0], b[3] - b[1]];
+      p.rotateDeg = ((p.rotateDeg + 360 - 90 * q) % 360) as Placement['rotateDeg'];
+      p.xMm = round(mx + w / 2);
+      p.yMm = round(my - h / 2);
+    }
+    changed();
+    return;
+  }
+  if (ps.some((p) => p.source.kind === 'file' && p.source.fileType === 'pbm')) return warn('Photos can only turn in quarter turns (90°, 180°, 270°).');
+  if (ps.some((p, k) => !views[k].layers.length)) {
+    return warn(getPhrase() ? 'Wait a moment for the laser lines, then rotate again.' : 'Turning by any angle works on the laser lines. Enter the class phrase first, or use 90°, 180° or 270°.');
+  }
+  if (ps.some((p) => { const i = resultIds.indexOf(p.id); return i >= 0 && result?.unassigned?.some((u) => u.part === i); })) {
+    return warn('Choose what each colour does first (under Layers), then rotate.');
+  }
+  for (const [k, p] of ps.entries()) {
+    const lines = views[k].layers.flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts: pts.map(spin) })));
+    bakeLines(p, lines, '(rotated)');
+  }
+  changed();
+  cacheBaked(...ps);
+  warn(`Turned ${turn}°. Turned by an odd angle, text and shapes become drawings (Ctrl+Z goes back).`, '✓');
+}
+
+$('rotAngle').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const el = e.target as HTMLInputElement;
+  rotateBy(Number(el.value));
+  el.value = '';
+  el.blur(); // so Ctrl+Z undoes the turn, not the typing
+});
 
 $('selectAll').onclick = selectAll;
 $('zoomIn').onclick = () => ws.zoomBy(1.3);

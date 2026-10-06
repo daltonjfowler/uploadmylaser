@@ -73,6 +73,7 @@
       <label id="angField" hidden data-hint="The line's angle: 0° points right, 90° points up. Its first point stays put.">Angle <input id="selAng" type="number" step="1"> °</label>
       <button id="lock" class="lockbtn" type="button" aria-pressed="true" data-hint="Lock: corner squares and typed sizes keep the shape. Unlock to stretch from the corners too. Side squares always stretch one way. (Shift while dragging a corner flips it.)">🔒</button>
       <label id="xyBox" data-hint="Where the middle of the part sits. 0, 0 is the bed's top-right corner.">X <input id="selX" type="number" step="1"> Y <input id="selY" type="number" step="1"></label>
+      <label data-hint="Type an angle and press Enter to turn the selection around its middle. + turns counter-clockwise, like AutoCAD (−30 turns clockwise). 90, 180 and 270 keep text as text; other angles turn it into a drawing.">Rotate <input id="rotAngle" type="number" step="any" placeholder="0" style="width:4.5em"> °</label>
       <span id="pctBox">
         <label data-hint="Size as a percent of the original. Type 100 for the original size.">Scale <input id="selPct" type="number" step="1" min="1"></label>
         <span id="pctY" hidden><label data-hint="Height as a percent of the original.">× <input id="selPctY" type="number" step="1" min="1"></label></span>
