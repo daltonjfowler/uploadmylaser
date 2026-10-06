@@ -403,3 +403,34 @@ def test_loose_lines_rectangle_is_cut_after_its_hole():
     hole = [(20.0, 20.0), (30.0, 20.0), (30.0, 30.0), (20.0, 30.0), (20.0, 20.0)]
     out = order_cuts(join_paths(outer + [hole]))
     assert out[0] == hole and len(out) == 2
+
+
+def test_weld_open_ends_closed_joins_small_gaps_only():
+    """Dalton 2026-10-06: offer a weld when a shape isn't closed and can't be engraved."""
+    from app.geometry import Item
+    from app.geometry.shapes_ops import close_gaps
+    sq = [Item("k", "engrave", [(0.0, 0.0), (10.0, 0.0)], False), Item("k", "engrave", [(10.0, 0.0), (10.0, 10.0)], False),
+          Item("k", "engrave", [(10.0, 10.0), (0.0, 10.0)], False), Item("k", "engrave", [(0.0, 10.4), (0.0, 0.6)], False)]  # two 0.4-0.6 mm gaps
+    far = Item("k", "engrave", [(50.0, 0.0), (60.0, 0.0), (60.0, 10.0)], False)  # an L whose ends are 14 mm apart
+    hole = Item("k", "engrave", [(2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 2.0)], True)
+    out = close_gaps(sq + [far, hole])
+    closed = [i for i in out if i.closed]
+    assert len(closed) == 2  # the square, closed; the hole untouched
+    assert hole in out
+    sqr = next(i for i in closed if i is not hole)
+    assert sqr.pts[0] == sqr.pts[-1] and len(sqr.pts) >= 5
+    assert [i.closed for i in out if i.pts[0] == (50.0, 0.0) or i.pts[-1] == (50.0, 0.0)] == [False]
+
+
+def test_open_engrave_lines_name_their_part_and_close_gaps_fixes_them():
+    svg = (b'<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" viewBox="0 0 20 20">'
+           b'<path d="M1 1 L19 1 L19 19 L1 19 L1 1.5" fill="none" stroke="#0000ff"/></svg>')  # 0.5 mm short of closed
+    def run(**extra):
+        j = ContainerJob(request=ProcessRequest(material_id="ply3", parts=[FilePart(file_index=0, file_type="svg", x_mm=100, y_mm=10, **extra)]),
+                         material=MAT, machine=M, files_b64=[base64.b64encode(svg).decode()])
+        return process(j)
+    res = run()
+    assert res.open_engrave_parts == [0]
+    fixed = run(close_gaps=True)
+    assert fixed.open_engrave_parts == []
+    assert any(l.kind == "engrave" for l in fixed.preview)

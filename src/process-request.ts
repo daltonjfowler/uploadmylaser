@@ -86,6 +86,7 @@ function validatePlacement(p: Record<string, unknown>, n: number): Placement {
 function validateExtras(p: Record<string, unknown>, n: number): PartExtras {
   const out: PartExtras = {};
   if (p.weld === true) out.weld = true;
+  if (p.closeGaps === true) out.closeGaps = true;
   const o = p.outline;
   if (o !== undefined && o !== null) {
     if (!isObj(o) || !finite(o.distMm) || o.distMm < 0.5 || o.distMm > MAX_OUTLINE_MM) bad(`The outline on part ${n} must be 0.5 to ${MAX_OUTLINE_MM} mm away.`);

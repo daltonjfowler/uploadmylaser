@@ -48,7 +48,7 @@ label.block { display: flex; flex-direction: column; align-items: stretch; gap: 
 .panelname { margin: 0 0 8px; gap: 8px; }
 .panelname input { width: 9ch; text-transform: uppercase; font-family: ui-monospace, monospace; }
 .gate { position: fixed; inset: 0; background: rgba(17,24,39,.6); display: grid; place-items: center; z-index: 10; padding: 16px; }
-.gate .card { max-width: 360px; width: 100%; }
+.gate .card { max-width: 360px; width: 100%; max-height: calc(100vh - 32px); overflow-y: auto; } /* short laptop screens: the buttons stay reachable */
 .gate input { width: 100%; margin: 6px 0; }
 .log { background: #111827; color: #d1fae5; padding: 10px; border-radius: 8px; max-height: 360px; overflow: auto; font-size: .8rem; white-space: pre-wrap; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
@@ -57,7 +57,7 @@ label.block { display: flex; flex-direction: column; align-items: stretch; gap: 
 
 /* ---------- student app: a laser-software-like window ---------- */
 body.app { height: 100vh; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; overflow: hidden; }
-.titlebar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--top); color: var(--ink); border-bottom: 1px solid var(--line); }
+.titlebar { display: flex; flex-wrap: wrap; row-gap: 6px; gap: 8px; align-items: center; padding: 8px 12px; background: var(--top); color: var(--ink); border-bottom: 1px solid var(--line); }
 .brand { margin-right: auto; font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; display: inline-flex; align-items: center; gap: 10px; }
 .brand img { border-radius: 12px; }
 .toolbar, .sizebar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; background: var(--chrome2); color: var(--chrome-ink); border-bottom: 1px solid var(--line); }

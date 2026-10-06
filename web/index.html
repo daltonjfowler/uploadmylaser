@@ -163,6 +163,7 @@
           </select>
         </label>
         <label class="check" data-hint="Weld: overlapping shapes of the same colour become one outline. Good for cut-out names in joined-up fonts."><input type="checkbox" id="pWeld"> Weld overlapping shapes</label>
+        <label class="check" data-hint="Joins line ends up to 1 mm apart, so shapes that are not quite closed can be engraved (filled). Nothing else changes."><input type="checkbox" id="pClose"> Weld open ends closed</label>
         <label class="check" data-hint="A Cut through line all the way around this part. Makes keychains, tags and stickers."><input type="checkbox" id="pOutline"> Cut an outline around it</label>
         <div class="indent">
           <label>Gap <input id="pDist" type="number" min="0.5" max="20" step="any" value="3"> mm</label>
@@ -271,6 +272,15 @@
             <li><b>Pattern</b> makes rows and columns of copies, like a sheet of keychains.</li>
             <li>Your design is saved on this Chromebook, so a reload won't lose it.</li>
             <li>Stay with the laser the whole time, and know where the red emergency stop is. This site is not a safety system: your teacher checks every job and watches the laser.</li>
+          </ul>
+        </section>
+        <section>
+          <h3>Laser not found?</h3>
+          <ul>
+            <li>Laser switched on, USB cable plugged in. Try another USB socket on the laptop.</li>
+            <li><b>Connect laser</b> lists every USB port. The laser is often called <i>USB Serial Port (COM…)</i>. Picked the wrong one? <b>Choose USB port…</b> shows the list again.</li>
+            <li>Stuck, or a Send that never ends: <b>↻ Reset USB</b>. Still stuck: unplug the USB cable, plug it back in, and reload the page.</li>
+            <li><b>For teachers, Windows laptops:</b> if the laser is never in the list, plug it in and open Device Manager. Under <i>Universal Serial Bus controllers</i>, open <i>USB Serial Converter</i> → Properties → Advanced, tick <b>Load VCP</b>, OK, then unplug and replug. It should now show under <i>Ports (COM &amp; LPT)</i>. A yellow warning sign there means the FTDI driver is missing (ask IT).</li>
           </ul>
         </section>
       </div>

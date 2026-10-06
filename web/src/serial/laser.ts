@@ -93,8 +93,10 @@ export class LaserLink {
   async connect(pick: 'auto' | 'filtered' | 'all' = 'auto', remembered?: PortId | null, chosen?: SerialPort): Promise<void> {
     if (!LaserLink.supported()) throw new Error('This browser cannot talk to USB devices. Use Chrome on a Chromebook.');
     const granted = await navigator.serial.getPorts();
+    // The picker lists every port: the laser's USB chip is not verified (docs/HARDWARE.md), and a vendor
+    // filter that guessed wrong showed an empty list (Dalton 2026-10-06).
     const port = chosen ?? (pick === 'auto' ? choosePort(granted, remembered ?? null) : null)
-      ?? (await navigator.serial.requestPort(pick === 'all' ? {} : { filters: [FTDI_FILTER] }));
+      ?? (await navigator.serial.requestPort({}));
     try {
       await port.open({ baudRate: this.opts.baud, flowControl: this.opts.flowControl ?? 'hardware', bufferSize: 4096 });
     } catch (e) {

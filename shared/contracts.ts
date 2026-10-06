@@ -69,7 +69,8 @@ export interface Placement {
 /** Cut line `distMm` around everything in a part, optionally with a keyring hole (`holeMm` across). */
 export interface OutlineSpec { distMm: number; holeMm?: number }
 /** Extras any part may have: weld its overlapping shapes, and/or add an outline. */
-export interface PartExtras { weld?: boolean; outline?: OutlineSpec }
+/** closeGaps: weld open ends closed (gaps up to 1 mm), so open shapes can be engraved */
+export interface PartExtras { weld?: boolean; closeGaps?: boolean; outline?: OutlineSpec }
 
 export interface TextSpec { value: string; font: TextFontId; heightMm: number; op: OpKind }
 
@@ -112,6 +113,7 @@ export interface ProcessResponse {
   partColors?: PartColor[];                 // every colour in every file part, for the colour list
   warnings: string[];
   errors: string[];
+  openEngraveParts?: number[]; // parts with open lines that engraving skipped
 }
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // all files in one request together

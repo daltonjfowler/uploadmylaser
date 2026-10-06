@@ -7,10 +7,14 @@
 FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS dwg
 ARG LIBREDWG=0.14
 ARG LIBREDWG_SHA256=62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config xz-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config xz-utils curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-ADD https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG}.tar.xz /tmp/
-RUN cd /tmp && echo "${LIBREDWG_SHA256}  libredwg-${LIBREDWG}.tar.xz" | sha256sum -c - \
+# Downloaded in a RUN (cached by its text), not ADD <url>: ADD asks the server on every build, so a GNU
+# outage failed every deploy (2026-10-06). Any mirror will do: the sha256 below is what is trusted.
+RUN cd /tmp && for m in https://ftpmirror.gnu.org https://mirrors.kernel.org/gnu https://ftp.gnu.org/gnu; do \
+      curl -fsSL --retry 2 --connect-timeout 20 -o libredwg-${LIBREDWG}.tar.xz "$m/libredwg/libredwg-${LIBREDWG}.tar.xz" && break; \
+    done \
+ && echo "${LIBREDWG_SHA256}  libredwg-${LIBREDWG}.tar.xz" | sha256sum -c - \
  && tar xf libredwg-${LIBREDWG}.tar.xz && cd libredwg-${LIBREDWG} \
  && ./configure --disable-shared --enable-static --disable-bindings --disable-docs --disable-python >/dev/null \
  && make -j"$(nproc)" -C src >/dev/null && make -j"$(nproc)" -C programs dwg2dxf >/dev/null \

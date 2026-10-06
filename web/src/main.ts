@@ -1986,6 +1986,7 @@ function renderPartPanel(): void {
     $<HTMLSelectElement>('pUnits').value = String(DXF_UNITS.includes(said as DxfUnits) ? said : 4);
   }
   set('pWeld', !!p.weld);
+  set('pClose', !!p.closeGaps);
   set('pOutline', !!p.outline);
   set('pHole', !!p.outline?.holeMm);
   const idle = (id: string, v: number) => { const el = $<HTMLInputElement>(id); if (document.activeElement !== el) el.value = String(v); };
@@ -1996,19 +1997,43 @@ function renderPartPanel(): void {
   $<HTMLInputElement>('pHoleMm').disabled = !p.outline?.holeMm;
 }
 
+/** Open lines that engraving skipped: offer to weld their ends closed (Dalton 2026-10-06). */
+function weldOffer(): HTMLElement[] {
+  if (pending || !result?.openEngraveParts?.length) return [];
+  const open = result.openEngraveParts.map((i) => find(resultIds[i])).filter((q): q is DesignPart => !!q);
+  const todo = open.filter((q) => !q.closeGaps);
+  const li = document.createElement('li');
+  li.className = 'warn';
+  if (!todo.length) {
+    li.textContent = 'Some lines still do not close: their gaps are bigger than 1 mm. Close them in your drawing.';
+    return [li];
+  }
+  const btn = Object.assign(document.createElement('button'), { type: 'button', className: 'small', textContent: 'Weld them closed' });
+  btn.dataset.hint = 'Joins line ends that are up to 1 mm apart, so the shapes close and can be engraved. Nothing else changes.';
+  btn.onclick = () => {
+    for (const q of todo) q.closeGaps = true;
+    changed();
+    renderPartPanel();
+  };
+  li.append(`${todo.length === 1 ? 'This part has' : `${todo.length} parts have`} shapes that are not closed, so they can't be engraved. `, btn);
+  return [li];
+}
+
 function readPartPanel(): void {
   const p = find(selected);
   if (!p) return;
   const num = (id: string, lo: number, hi: number, dflt: number) => clamp(Number($<HTMLInputElement>(id).value) || dflt, lo, hi);
   if ($<HTMLInputElement>('pWeld').checked) p.weld = true;
   else delete p.weld;
+  if ($<HTMLInputElement>('pClose').checked) p.closeGaps = true;
+  else delete p.closeGaps;
   if ($<HTMLInputElement>('pOutline').checked) {
     const hole = $<HTMLInputElement>('pHole').checked ? num('pHoleMm', 2, 12, 5) : 0;
     p.outline = { distMm: num('pDist', 0.5, 20, 3), ...(hole ? { holeMm: hole } : {}) };
   } else delete p.outline;
   changed();
 }
-for (const id of ['pWeld', 'pOutline', 'pHole', 'pDist', 'pHoleMm']) $(id).addEventListener('change', readPartPanel);
+for (const id of ['pWeld', 'pClose', 'pOutline', 'pHole', 'pDist', 'pHoleMm']) $(id).addEventListener('change', readPartPanel);
 $('pUnits').addEventListener('change', () => {
   const p = find(selected);
   if (p?.source.kind !== 'file' || p.source.fileType !== 'dxf') return;
@@ -2362,6 +2387,7 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
     if (p.flipX) pl.flipX = true;
     if (p.flipY) pl.flipY = true;
     if (p.weld) pl.weld = true;
+    if (p.closeGaps) pl.closeGaps = true;
     if (p.outline) pl.outline = { ...p.outline };
     const s = p.source;
     if (s.kind === 'text') {
@@ -2414,10 +2440,15 @@ async function run(): Promise<void> {
   try {
     const res = await processDesign(req, files);
     if (mine !== seq) return; // a newer request superseded this one
+    const hadOpen = !!result?.openEngraveParts?.length;
     result = res;
     resultIds = ids;
     notes = [];
     remember(res, ids, sigs);
+    // say it once, where the student is looking; the button itself is in the Laser panel
+    if (!hadOpen && res.openEngraveParts?.some((i) => !find(ids[i])?.closeGaps)) {
+      warn('Some shapes are not closed, so they can’t be engraved. Press Weld them closed in the Laser panel.');
+    }
   } catch (e) {
     if (mine !== seq) return;
     result = null;
@@ -2530,7 +2561,7 @@ function render(): void {
     warnings.push(`Your design (${round(job[2] - job[0], 0)} × ${round(job[3] - job[1], 0)} mm) is bigger than your material (${material.w} × ${material.h} mm).`);
   }
   const li = (t: string, cls: string) => Object.assign(document.createElement('li'), { textContent: t, className: cls });
-  $('messages').replaceChildren(...errors.map((e) => li(e, 'err')), ...notes.map((n) => li(n, 'note')), ...warnings.map((w) => li(w, 'warn')));
+  $('messages').replaceChildren(...errors.map((e) => li(e, 'err')), ...notes.map((n) => li(n, 'note')), ...warnings.map((w) => li(w, 'warn')), ...weldOffer());
   $('estimate').textContent = result?.rd && !pending ? `About ${fmtTime(result.estimateS)} on the laser.` : '';
   $('rotate').toggleAttribute('disabled', selected === null);
   renderSelectButtons();
@@ -2570,8 +2601,8 @@ async function connectLaser(pick: 'auto' | 'filtered' | 'all', chosen?: SerialPo
   } catch (e) {
     setConnected(false);
     if ((e as Error).name === 'NotFoundError') {
-      // Picker cancelled, maybe because the laser wasn't listed. Next click shows every port.
-      if (!pickerCancelled) warn('Laser not in the list? Press Choose USB port… to see every USB port.');
+      // Picker cancelled, maybe because the laser wasn't listed
+      warn('Laser not in the list? Check the USB cable is in and the laser is switched on, then press Connect laser again. Still missing: Help has steps for your teacher.');
       pickerCancelled = true;
     } else warn(`${(e as Error).message} Or press Choose USB port… to pick the laser again.`);
     render();

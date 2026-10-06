@@ -77,6 +77,7 @@ class TextSpec(_Camel):
 
 class FilePart(Placement):
     weld: bool = False
+    close_gaps: bool = False  # weld open ends closed, so open shapes can be engraved
     outline: Optional[OutlineSpec] = None
     kind: Literal["file"] = "file"
     file_index: int = Field(ge=0)
@@ -87,6 +88,7 @@ class FilePart(Placement):
 
 class TextPart(Placement):
     weld: bool = False
+    close_gaps: bool = False
     outline: Optional[OutlineSpec] = None
     kind: Literal["text"] = "text"
     text: TextSpec
@@ -141,3 +143,4 @@ class ProcessResponse(_Camel):
     part_colors: list[PartColor] = []  # every colour in every file part, for the colour list
     warnings: list[str] = []
     errors: list[str] = []
+    open_engrave_parts: list[int] = []  # parts with open lines that engraving had to skip

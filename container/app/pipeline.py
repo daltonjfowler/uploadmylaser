@@ -9,7 +9,7 @@ from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, I
 from .geometry.hatch import hatch
 from .geometry.order import join_paths, nearest_neighbour, order_cuts
 from .geometry.photo_import import PHOTO_KEY
-from .geometry.shapes_ops import outline, weld
+from .geometry.shapes_ops import close_gaps, outline, weld
 from .geometry.transform import bbox, place
 from .models import ContainerJob, FilePart, OpKind, OpSettings, Part, PartColor, PartPaths, PreviewLayer, ProcessResponse
 from .ruida.encoder import EncLayer, clamp_settings, encode_job, frame_layers, machine_converter
@@ -127,6 +127,8 @@ def process(job: ContainerJob) -> ProcessResponse:
             continue
         if got:
             placed_part, next_group = _place_part(got, part, next_group)
+            if part.close_gaps:
+                placed_part = close_gaps(placed_part)
             if part.weld:
                 placed_part = weld(placed_part)
             if part.outline is not None:
@@ -216,6 +218,7 @@ def process(job: ContainerJob) -> ProcessResponse:
             closed = [i for i in rest if i.closed]
             if len(closed) < len(rest):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
+                res.open_engrave_parts = sorted({pi for pi, i in group if i.key != PHOTO_KEY and not i.closed})
             paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed]) + [i.pts for i in photo]
             shown = [i.pts for i in closed] + [i.pts for i in photo]
         elif off_bed:
