@@ -5,8 +5,8 @@
 import type { MachineConfig, Material } from '../shared/contracts.ts';
 
 export const DEFAULT_MACHINE: MachineConfig = {
-  bedWidthMm: 914,   // LS-3655: 36" x 24". Confirm in docs/HARDWARE.md
-  bedHeightMm: 609,
+  bedWidthMm: 1219,  // 48" wide (X) x 36" deep (Y): Dalton, 2026-10-06 (docs/HARDWARE.md)
+  bedHeightMm: 914,
   origin: 'top-right',
   jobOriginMode: 'relative', // teacher's preference: job's top-right corner starts at the laser head
   swizzleMagic: 0x88, // RDC6445S, verified from reference .rd files

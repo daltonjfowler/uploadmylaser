@@ -33,7 +33,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 
 const STORE = 'uml.design';
 
-let machine: PublicMachine = { bedWidthMm: 914, bedHeightMm: 609, swizzleMagic: 0x88, baud: 115200, maxJobMinutes: 20 };
+let machine: PublicMachine = { bedWidthMm: 1219, bedHeightMm: 914, swizzleMagic: 0x88, baud: 115200, maxJobMinutes: 20 };
 let materials: PublicMaterial[] = [];
 let materialId = '';
 let parts: DesignPart[] = [];

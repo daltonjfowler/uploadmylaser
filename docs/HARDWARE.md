@@ -15,7 +15,7 @@ people's reverse engineering.
 | ACK / reply bytes over USB | none expected | ☐ | serial-test.html RX log |
 | Job starts on receive, or waits for panel Start? | waits for Start on the panel | ✅ | teacher, 2026-09-24, streamed from the app on a Windows ThinkPad |
 | Home / origin corner | top-right (guess) | ☐ | jog to home, then note the corner |
-| Bed size | 914 × 609 mm (36" × 24") | ☐ | spec sheet / laser software device settings |
+| Bed size | 1219 × 914 mm (48" wide × 36" deep) | ☑ | Dalton, 2026-10-06 ("width 48, height 36, standard"). Was 36 × 24, never checked |
 | STOP (D8 01) aborts a running job | ? | ☐ | send a long job, press STOP |
 | Frame (move-only job) traces without firing | ? | ☐ | |
 

@@ -79,7 +79,7 @@ const GRIP = 12; // css px, radius of the move grip under the selection
 
 export class Workspace {
   private g: CanvasRenderingContext2D;
-  private bed = { w: 914, h: 609 };
+  private bed = { w: 1219, h: 914 };
   private parts: PartView[] = [];
   private selected: number | null = null;
   /** Several parts selected (Ctrl+A, Shift+click): they move together; resizing is for one part. */
