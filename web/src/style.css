@@ -57,7 +57,10 @@ label.block { display: flex; flex-direction: column; align-items: stretch; gap: 
 
 /* ---------- student app: a laser-software-like window ---------- */
 body.app { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
-.topbars { position: sticky; top: 0; z-index: 6; min-width: 0; }
+.topbars { position: sticky; top: 0; z-index: 6; min-width: 0; zoom: var(--bars-zoom, 1); }
+.barsgrip { height: 7px; cursor: row-resize; touch-action: none; background: var(--chrome); border-bottom: 1px solid var(--line); }
+.barsgrip::after { content: ""; display: block; width: 44px; height: 3px; margin: 2px auto 0; border-radius: 2px; background: var(--line); }
+.barsgrip:hover::after, .barsgrip.on::after, .barsgrip:focus-visible::after { background: var(--accent); }
 .titlebar { display: flex; flex-wrap: wrap; row-gap: 6px; gap: 8px; align-items: center; padding: 8px 12px; background: var(--top); color: var(--ink); border-bottom: 1px solid var(--line); }
 .brand { margin-right: auto; font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; display: inline-flex; align-items: center; gap: 10px; }
 .brand img { border-radius: 12px; }

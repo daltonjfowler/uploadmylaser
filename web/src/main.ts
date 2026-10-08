@@ -2691,6 +2691,45 @@ $('connect').onclick = async () => {
 };
 // Pick first, change the connection after: Cancel, or picking the port already open, leaves a working
 // connection alone (Dalton 2026-10-05: failsafes must never lose the right connection).
+// ---------- menu size: drag the handle under the menus (Dalton 2026-10-08) ----------
+
+const BARS_KEY = 'uml.barsZoom';
+const topbars = document.querySelector<HTMLElement>('.topbars')!;
+function setBarsZoom(z: number, save = true): number {
+  z = Math.round(clamp(z, 0.7, 1.6) * 100) / 100;
+  if (z === 1) topbars.style.removeProperty('--bars-zoom');
+  else topbars.style.setProperty('--bars-zoom', String(z));
+  if (save) {
+    try { localStorage.setItem(BARS_KEY, String(z)); } catch { /* fine */ }
+  }
+  ws.draw(); // the bed got taller or shorter
+  return z;
+}
+try {
+  const z = Number(localStorage.getItem(BARS_KEY));
+  if (z) setBarsZoom(z, false);
+} catch { /* default size */ }
+const barsZoom = () => Number(topbars.style.getPropertyValue('--bars-zoom')) || 1;
+const barsGrip = $('barsGrip');
+barsGrip.onpointerdown = (e) => {
+  e.preventDefault();
+  barsGrip.setPointerCapture(e.pointerId);
+  barsGrip.classList.add('on');
+  const [y0, h0, z0] = [e.clientY, topbars.getBoundingClientRect().height, barsZoom()];
+  barsGrip.onpointermove = (ev) => { setBarsZoom(z0 * (h0 + ev.clientY - y0) / h0); };
+  barsGrip.onpointerup = barsGrip.onpointercancel = () => {
+    barsGrip.onpointermove = barsGrip.onpointerup = barsGrip.onpointercancel = null;
+    barsGrip.classList.remove('on');
+  };
+};
+barsGrip.ondblclick = () => setBarsZoom(1);
+barsGrip.onkeydown = (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    setBarsZoom(barsZoom() + (e.key === 'ArrowDown' ? 0.05 : -0.05));
+  }
+};
+
 // Reset USB: close everything and reopen the same remembered laser port. No picker, nothing forgotten,
 // the remembered port is not changed (Dalton 2026-10-05: failsafes must never lose the right connection).
 $('resetUsb').onclick = async () => {
