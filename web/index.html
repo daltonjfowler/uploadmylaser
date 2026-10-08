@@ -15,6 +15,8 @@
   <script src="/logo-alive.js" defer></script>
 </head>
 <body class="app">
+  <!-- One block, pinned: the menus and the size row never scroll away, at any zoom (Dalton 2026-10-07) -->
+  <div class="topbars">
   <header class="titlebar">
     <strong class="brand"><img src="/icon.svg" data-logo alt="" width="54" height="54">uploadmylaser</strong>
     <button id="help" class="toplink" type="button" data-hint="Shortcuts and tips.">ⓘ Help</button>
@@ -87,6 +89,7 @@
     </span>
     <span id="fontTip" class="muted small"></span>
     <label class="unitsel" data-hint="Units for sizes and the rulers.">Units <select id="units"><option value="mm">mm</option><option value="cm">cm</option><option value="in">in</option></select></label>
+  </div>
   </div>
 
   <main class="workarea">
