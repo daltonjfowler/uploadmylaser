@@ -116,6 +116,8 @@ def import_svg(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budg
                 f_key = None  # same op either way (e.g. black stroke + black fill): emit once, not twice
         for pts_px, closed in _flatten(Path(el), tol_px, budget):
             pts = [(x * PX_TO_MM, y * PX_TO_MM) for x, y in pts_px]
+            if not all(math.isfinite(c) for p in pts for c in p):  # NaN/inf: the pipeline says "couldn't read"
+                raise ValueError("SVG coordinates are not finite")
             # group per element: holes inside one path stay empty, and overlapping separate shapes stay filled (as SVG paints them)
             if s_key is not None:
                 items.append(Item(s_key, s_kind, pts, closed, el_index))

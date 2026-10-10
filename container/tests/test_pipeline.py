@@ -202,9 +202,9 @@ def test_two_parts_keep_engrave_fills_separate(monkeypatch):
     from app.geometry.hatch import region
     seen = {}
 
-    def spy(polys, spacing, groups=None):
+    def spy(polys, spacing, groups=None, start=(0.0, 0.0)):
         seen.update(polys=polys, groups=groups)
-        return hatch(polys, spacing, groups)
+        return hatch(polys, spacing, groups, start)
     monkeypatch.setattr(pipeline, "hatch", spy)
     res = process(multi(square(20), square(20), at=[(30, 10), (40, 10)]))  # x 10..30 and 20..40
     assert res.errors == [] and res.rd, res.errors

@@ -12,6 +12,7 @@ from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import unary_union
 
 from . import Item, Pt
+from .areas import area_of, even_odd
 from .photo_import import PHOTO_KEY
 
 OUTLINE_KEY = "outline"
@@ -22,19 +23,13 @@ RING_WALL_MM = 3.0  # wood around a keyring hole
 
 def _rings_to_polygons(items: list[Item]) -> list[Polygon]:
     """Closed rings → polygons, even-odd inside each group (a letter's hole stays a hole)."""
-    by_group: dict[object, list[Polygon]] = {}
+    by_group: dict[object, list] = {}
     for it in items:
         if it.closed and len(it.pts) >= 3:
-            poly = Polygon(it.pts).buffer(0)
+            poly = area_of(it.pts)  # make_valid: a figure 8 keeps both loops
             if not poly.is_empty:
                 by_group.setdefault(it.group, []).append(poly)
-    out: list[Polygon] = []
-    for polys in by_group.values():
-        shape = polys[0]
-        for p in polys[1:]:
-            shape = shape.symmetric_difference(p)
-        out.append(shape)
-    return out
+    return [even_odd(polys) for polys in by_group.values()]
 
 
 def _polygons(g) -> list[Polygon]:

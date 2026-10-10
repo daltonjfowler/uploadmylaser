@@ -7,7 +7,7 @@ import math
 
 from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
 from .geometry.hatch import hatch
-from .geometry.order import join_paths, nearest_neighbour, order_cuts
+from .geometry.order import join_paths, nearest_neighbour, order_cut_groups
 from .geometry.photo_import import PHOTO_KEY
 from .geometry.shapes_ops import close_gaps, outline, weld
 from .geometry.transform import bbox, place
@@ -127,6 +127,10 @@ def process(job: ContainerJob) -> ProcessResponse:
             continue
         if got:
             placed_part, next_group = _place_part(got, part, next_group)
+            # NaN slips through min/max (the off-bed check), so nothing non-finite may get past placement
+            if not all(math.isfinite(c) for it in placed_part for pt in it.pts for c in pt):
+                res.errors.append(f"We couldn't read \"part {pi + 1}\". Try exporting it again.")
+                continue
             if part.close_gaps:
                 placed_part = close_gaps(placed_part)
             if part.weld:
@@ -207,6 +211,8 @@ def process(job: ContainerJob) -> ProcessResponse:
     # Which part a path came from, even if ordering reversed it: every placed point is its own tuple object.
     owner = {id(pt): pi for pi, it in kept for pt in (it.pts[0], it.pts[-1])}
     layers: list[tuple[OpKind, OpSettings, list[list[Pt]]]] = []
+    batches: dict[OpKind, list[int]] = {}
+    cur = _head_start((x0, y0, x1, y1), m)  # each layer starts where the one before it ended
     for kind in LAYER_ORDER:
         group = [(pi, i) for pi, i in kept if i.kind == kind]
         if not group:
@@ -219,7 +225,7 @@ def process(job: ContainerJob) -> ProcessResponse:
             if len(closed) < len(rest):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
                 res.open_engrave_parts = sorted({pi for pi, i in group if i.key != PHOTO_KEY and not i.closed})
-            paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed]) + [i.pts for i in photo]
+            paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed], cur) + [i.pts for i in photo]
             shown = [i.pts for i in closed] + [i.pts for i in photo]
         elif off_bed:
             paths, shown = [], [i.pts for _, i in group]
@@ -227,7 +233,12 @@ def process(job: ContainerJob) -> ProcessResponse:
             # the preview keeps each part's own lines; only the laser's paths are joined
             shown = [i.pts for _, i in group]
             raw = join_paths(shown) if req.join_lines else shown
-            paths = nearest_neighbour(raw) if kind == "score" else order_cuts(raw)
+            if kind == "score":
+                paths = nearest_neighbour(raw, cur)
+            else:
+                groups = order_cut_groups(raw, cur)
+                paths = [p for g in groups for p in g]
+                batches[kind] = [len(g) for g in groups]
         shown_by_part: dict[int, list[list[Pt]]] = {}
         for p in shown:
             shown_by_part.setdefault(owner[id(p[0])], []).append(p)
@@ -235,6 +246,7 @@ def process(job: ContainerJob) -> ProcessResponse:
             res.preview.append(PreviewLayer(kind=kind, part=pi, paths=_round(shown_by_part.get(pi, []))))
         if paths:
             layers.append((kind, s, paths))
+            cur = paths[-1][-1]
     res.warnings = list(warnings)
     if off_bed:
         return res
@@ -245,11 +257,21 @@ def process(job: ContainerJob) -> ProcessResponse:
         return res
 
     conv = machine_converter((x0, y0, x1, y1), m)
-    enc = [EncLayer(k, s, [[conv(x, y) for x, y in p] for p in paths]) for k, s, paths in layers]
+    enc = [EncLayer(k, s, [[conv(x, y) for x, y in p] for p in paths], batches.get(k)) for k, s, paths in layers]
     res.rd = base64.b64encode(encode_job(enc, m)).decode()
-    frame = frame_layers((x0, y0, x1, y1), conv, layers[0][1])
+    # the frame traces the box once, whatever the first layer's passes are
+    frame = frame_layers((x0, y0, x1, y1), conv, layers[0][1].model_copy(update={"passes": 1}))
     res.frame_rd = base64.b64encode(encode_job(frame, m, laser_on=False)).decode()
     return res
+
+
+def _head_start(b: tuple[float, float, float, float], m) -> Pt:
+    """Where the laser head is when the job starts, on the bed: at the design's origin corner in relative
+    mode (the job is anchored at the head), else at the machine's home corner."""
+    right, bottom = m.origin.endswith("right"), m.origin.startswith("bottom")
+    if m.job_origin_mode == "relative":
+        return (b[2] if right else b[0], b[3] if bottom else b[1])
+    return (m.bed_width_mm if right else 0.0, m.bed_height_mm if bottom else 0.0)
 
 
 def _round_box(b: tuple[float, float, float, float]) -> tuple[float, float, float, float]:

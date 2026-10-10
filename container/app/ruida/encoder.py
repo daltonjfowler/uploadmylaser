@@ -60,6 +60,18 @@ class EncLayer:
     kind: OpKind
     settings: OpSettings
     paths: list[Poly] = field(default_factory=list)  # machine µm, already ordered
+    # Sizes of consecutive runs of `paths`; every pass of one run happens before the next run starts, so
+    # a part's holes get all their passes before its outline (order_cut_groups). None: one run.
+    batches: list[int] | None = None
+
+    def runs(self) -> list[list[Poly]]:
+        if not self.batches or sum(self.batches) != len(self.paths) or min(self.batches) < 1:
+            return [self.paths]
+        out, k = [], 0
+        for n in self.batches:
+            out.append(self.paths[k:k + n])
+            k += n
+        return out
 
 
 # 0xRRGGBB, as in the reference files (layer 00 black = 0, layer 01 blue = 0x0000FF). Shown on the panel.
@@ -155,7 +167,7 @@ def encode_job(layers: list[EncLayer], m: MachineConfig, *, laser_on: bool = Tru
     # Cut through ALWAYS runs last, including every one of its passes. Once a part is cut free it can
     # shift or drop, so any engraving or marking after that would land in the wrong place.
     layers.sort(key=lambda ly: RUN_ORDER[ly.kind])  # stable: keeps order within a kind
-    layers = [EncLayer(ly.kind, clamp_settings(ly.settings, m), ly.paths) for ly in layers]
+    layers = [EncLayer(ly.kind, clamp_settings(ly.settings, m), ly.paths, ly.batches) for ly in layers]
     w = RdWriter()
     x0, y0, x1, y1 = _bounds([p for ly in layers for p in ly.paths])
 
@@ -233,11 +245,12 @@ def encode_job(layers: list[EncLayer], m: MachineConfig, *, laser_on: bool = Tru
         w(b"\xCA\x03", b"\x01")                        # enable laser tube start
         if not scan:
             w(b"\xCA\x10", b"\x00")
-        for _ in range(s.passes):
-            for poly in ly.paths:
-                w.move(*poly[0])
-                for pt in poly[1:]:
-                    (w.cut if laser_on else w.move)(*pt)
+        for run in ly.runs():
+            for _ in range(s.passes):
+                for poly in run:
+                    w.move(*poly[0])
+                    for pt in poly[1:]:
+                        (w.cut if laser_on else w.move)(*pt)
         if scan:
             w(b"\xE7\x00")                             # scan layers close with a block end
 
