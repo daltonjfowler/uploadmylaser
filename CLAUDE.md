@@ -51,3 +51,9 @@ anything not marked verified there as a guess.
 ## Style
 Match the existing code. Short comments only where the why isn't obvious. Student-facing error
 strings are plain, friendly sentences.
+
+## Code navigation: Serena (Dalton 2026-10-10)
+Use the Serena MCP tools by default in this repo. Start with `activate_project` on this repo's root folder
+(config in `.serena/project.yml`), then `get_symbols_overview` / `find_symbol` / `find_referencing_symbols`
+to read, and `replace_symbol_body` / `replace_content` / `insert_*_symbol` to edit. Plain Read/Grep only for
+non-code files or quick discovery.
