@@ -139,9 +139,15 @@ def _decompose(doc: Drawing, entities: Iterable[DXFEntity], made: list[int], par
         style = _style(doc, entity, parent)
         kind = entity.dxftype()
         if isinstance(entity, Insert):
+            if entity.mcount > MAX_BLOCK_ENTITIES:  # rows x columns, before making any of them
+                raise TooDetailed()
             copies = entity.multi_insert() if entity.mcount > 1 else [entity]
             yield from ((a, style, m) for a in entity.attribs)  # in the parent's coordinates
             for ref in copies:
+                if entity.mcount > 1:  # every copy counts, even of an empty block
+                    made[0] += 1
+                    if made[0] > MAX_BLOCK_ENTITIES:
+                        raise TooDetailed()
                 block = ref.block()
                 if block is None:
                     continue

@@ -225,7 +225,14 @@ def process(job: ContainerJob) -> ProcessResponse:
             if len(closed) < len(rest):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
                 res.open_engrave_parts = sorted({pi for pi, i in group if i.key != PHOTO_KEY and not i.closed})
-            paths = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed], cur) + [i.pts for i in photo]
+            lines = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed], cur)
+            paths = lines + ([] if off_bed else [i.pts for i in photo])
+            try:  # scan lines get their own budget (the photo's dots were counted on import)
+                PointBudget(MAX_POINTS).take(sum(len(p) for p in lines))
+            except TooDetailed:
+                res.errors = [TOO_DETAILED]
+                res.warnings = list(warnings)
+                return res
             shown = [i.pts for i in closed] + [i.pts for i in photo]
         elif off_bed:
             paths, shown = [], [i.pts for _, i in group]

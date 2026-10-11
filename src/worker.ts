@@ -25,6 +25,7 @@ import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
 import { checkIpLimit } from './ip-limit.ts';
 import { cacheStore, checkLockout, lockoutSubject, recordRight, recordWrong, type LockoutStore } from './lockout.ts';
+import { recordWrongFromIp } from './wrong-ip.ts';
 import {
   activeRecord, clampTtlMinutes, isUsablePhrase, normalizePhrase, PHRASE_KEY, phraseLengthMessage, type PhraseRecord,
 } from './phrase.ts';
@@ -44,6 +45,7 @@ interface Env {
   COUNTERS: DurableObjectNamespace<Counters>;
   PHRASE_IP_LIMIT: RateLimit; // wrangler.jsonc "ratelimits"
   PROCESS_IP_LIMIT: RateLimit;
+  WRONG_PHRASE_IP_LIMIT: RateLimit; // counts wrong phrases only (src/wrong-ip.ts)
   TEACHER_KEY?: string; // secret: npx wrangler secret put TEACHER_KEY
   TEACHER_KEY_2?: string; // optional second teacher (a student teacher); delete the secret to remove them
   ALLOWED_CIDRS?: string;
@@ -171,8 +173,8 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
 
 async function processDesign(req: Request, env: Env): Promise<Response> {
   const tooBig = `Your files are too big together (${MAX_UPLOAD_BYTES / 1024 / 1024} MB max).`;
-  const declared = Number(req.headers.get('content-length') ?? 0);
-  if (Number.isFinite(declared) && declared > MAX_PROCESS_BODY_BYTES) throw new HttpError(413, tooBig);
+  const declared = declaredLength(req);
+  if (declared > MAX_PROCESS_BODY_BYTES) throw new HttpError(413, tooBig);
   await processGates(req, env);
 
   let form: FormData;
@@ -237,8 +239,8 @@ async function processGates(req: Request, env: Env): Promise<void> {
 
 async function convertDwg(req: Request, env: Env): Promise<Response> {
   const tooBig = `That DWG is bigger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB. In AutoCAD, use Save As and pick a DXF instead.`;
-  const declared = Number(req.headers.get('content-length') ?? 0);
-  if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) throw new HttpError(413, tooBig);
+  const declared = declaredLength(req);
+  if (declared > MAX_UPLOAD_BYTES) throw new HttpError(413, tooBig);
   await processGates(req, env);
   const bytes = new Uint8Array(await req.arrayBuffer());
   if (bytes.length > MAX_UPLOAD_BYTES) throw new HttpError(413, tooBig);
@@ -356,7 +358,8 @@ async function teacherGate(req: Request, env: Env): Promise<void> {
 // refused (429 'locked') without comparing; a wrong phrase itself is still a plain 401, so the page
 // forgets a stale phrase. A right phrase clears that device's count. Compared in constant time.
 async function checkPhrase(req: Request, env: Env): Promise<void> {
-  const who = lockoutSubject(req.headers.get('x-device-id'), req.headers.get('cf-connecting-ip') ?? '');
+  const ip = req.headers.get('cf-connecting-ip') ?? '';
+  const who = lockoutSubject(req.headers.get('x-device-id'), ip);
   const store = lockoutStore();
   const prior = await checkLockout(store, 'phrase', who, Date.now());
   const rec = await readActivePhrase(env);
@@ -364,6 +367,7 @@ async function checkPhrase(req: Request, env: Env): Promise<void> {
   const got = normalizePhrase(req.headers.get('x-class-phrase') ?? '');
   if (!(await constantTimeEquals(got, rec.phrase))) {
     await recordWrong(store, 'phrase', who, prior, Date.now());
+    await recordWrongFromIp(env.WRONG_PHRASE_IP_LIMIT, ip); // wrong only: a right phrase is never refused by it
     throw new HttpError(401, 'That class phrase is not right.');
   }
   await recordRight(store, 'phrase', who, prior);
@@ -389,8 +393,7 @@ function checkCidr(req: Request, env: Env): void {
 // ---------- helpers ----------
 
 async function readJson(req: Request, maxBytes: number): Promise<unknown> {
-  const declared = Number(req.headers.get('content-length') ?? 0);
-  if (Number.isFinite(declared) && declared > maxBytes) throw new HttpError(413, 'That request is too large.');
+  if (declaredLength(req) > maxBytes) throw new HttpError(413, 'That request is too large.');
   const buf = await req.arrayBuffer();
   if (buf.byteLength > maxBytes) throw new HttpError(413, 'That request is too large.');
   try {
@@ -398,6 +401,15 @@ async function readJson(req: Request, maxBytes: number): Promise<unknown> {
   } catch {
     throw new HttpError(400, 'The request was not valid JSON.');
   }
+}
+
+// A body is only read when its size is declared up front: without content-length (chunked) the
+// runtime would buffer whatever arrives before any size check could run. Browsers always send it.
+function declaredLength(req: Request): number {
+  const raw = req.headers.get('content-length');
+  const n = raw === null || raw.trim() === '' ? NaN : Number(raw);
+  if (!Number.isSafeInteger(n) || n < 0) throw new HttpError(411, 'Your browser sent the design without its size. Reload the page and try again.');
+  return n;
 }
 
 function toBase64(bytes: Uint8Array): string {

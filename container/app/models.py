@@ -71,7 +71,7 @@ class OutlineSpec(_Camel):
 class TextSpec(_Camel):
     value: str = Field(min_length=1, max_length=120)  # up to 4 lines
     font: str = "sans"
-    height_mm: float = Field(default=15.0, gt=1, le=200)
+    height_mm: float = Field(default=15.0, ge=1, le=200)  # the Worker allows 1 mm too
     op: OpKind = "engrave"
 
 

@@ -3,13 +3,13 @@
   "name": "uploadmylaser",
   "main": "src/worker.ts",
   "compatibility_date": "2026-08-31",
-  // uploadmylaser.com is the real address; www redirects to it (src/headers.ts). The
-  // workers.dev URL stays on as a fallback.
+  // uploadmylaser.com is the real address; www redirects to it (src/headers.ts). The workers.dev
+  // URL is off: the Cache API (wrong-try lockouts) does nothing there, so it would skip them.
   "routes": [
     { "pattern": "uploadmylaser.com", "custom_domain": true },
     { "pattern": "www.uploadmylaser.com", "custom_domain": true }
   ],
-  "workers_dev": true,
+  "workers_dev": false,
   "assets": {
     "directory": "./public/",
     "binding": "ASSETS",
@@ -40,7 +40,10 @@
   // src/ratelimit.ts (400 a minute): never lower. namespace_id is unique across the whole account.
   "ratelimits": [
     { "name": "PROCESS_IP_LIMIT", "namespace_id": "20260940", "simple": { "limit": 400, "period": 60 } },
-    { "name": "PHRASE_IP_LIMIT", "namespace_id": "20260941", "simple": { "limit": 400, "period": 60 } }
+    { "name": "PHRASE_IP_LIMIT", "namespace_id": "20260941", "simple": { "limit": 400, "period": 60 } },
+    // Counts WRONG class phrases only (src/wrong-ip.ts), so right phrases from a whole class never
+    // count. uploadmylaser uses ids 9100-9199 for new limits.
+    { "name": "WRONG_PHRASE_IP_LIMIT", "namespace_id": "9100", "simple": { "limit": 60, "period": 60 } }
   ],
   "durable_objects": {
     "bindings": [

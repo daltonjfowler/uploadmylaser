@@ -63,8 +63,8 @@ Chromebook (Chrome)                          Cloudflare
   and Web Serial. The only Ruida logic in the browser is `swizzle()` plus a hard-coded
   **STOP** command, so STOP works even if the server is down.
 - **Server-side authority on safety:** the request carries `materialId`, never power/speed. The
-  container re-clamps everything to `absoluteMaxPowerPct` and enforces `maxJobMinutes` before
-  producing any bytes.
+  container re-clamps everything to `absoluteMaxPowerPct` / `minSpeedMmS` before producing any
+  bytes. `maxJobMinutes` is only shown with the time estimate, never a limit (Dalton).
 - **Stateless:** uploads are processed in memory and nothing is stored. Designs are kept in the
   student's localStorage, like sketches in uploadmycode.
 
@@ -250,8 +250,8 @@ Frame/Start as extras.
 - The STOP button works without the network. The physical E-stop and lid interlock remain the
   primary safety.
 - Before every send, the student acknowledges "stay with the laser."
-- Max job time is enforced server-side. Frame before cut is encouraged; consider making it
-  required.
+- The job time estimate is shown, never enforced (Dalton: `maxJobMinutes` is not a limit). Students
+  Frame on the laser's panel before Start.
 
 ---
 

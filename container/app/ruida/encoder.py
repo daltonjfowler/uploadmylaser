@@ -7,6 +7,7 @@ Everything here works in *machine* coordinates: see `to_machine()` for the bed â
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -26,8 +27,13 @@ def enc35(v: float) -> bytes:
     return bytes([(v >> 28) & 0x7F, (v >> 21) & 0x7F, (v >> 14) & 0x7F, (v >> 7) & 0x7F, v & 0x7F])
 
 
+def _pct(v: float) -> float:
+    """0..100, and 0 for NaN: a negative value would wrap to near full power in 14 bits."""
+    return 0.0 if math.isnan(v) else min(max(v, 0.0), 100.0)
+
+
 def enc_power(pct: float) -> bytes:
-    return enc14(pct * 16383 / 100.0)
+    return enc14(_pct(pct) * 16383 / 100.0)
 
 
 def enc_speed(mm_s: float) -> bytes:
@@ -106,8 +112,9 @@ def machine_converter(bbox_mm: tuple[float, float, float, float], m: MachineConf
 
 def clamp_settings(s: OpSettings, m: MachineConfig) -> OpSettings:
     """Last line of defence: nothing leaves the server above the machine ceiling."""
-    mx = min(s.power_max_pct, m.absolute_max_power_pct)
-    mn = min(s.power_min_pct, mx)
+    ceiling = _pct(m.absolute_max_power_pct)
+    mx = min(_pct(s.power_max_pct), ceiling)
+    mn = min(_pct(s.power_min_pct), mx)
     return s.model_copy(update={
         "power_max_pct": mx,
         "power_min_pct": mn,

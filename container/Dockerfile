@@ -42,7 +42,7 @@ RUN cd /usr/share/fonts/truetype/uml && printf '%s\n' \
     '28f82c8a7943cb8e9d599f8554da1d4fc75dbcf69b9885ad6c0611d20c6946c5  PermanentMarker-Regular.ttf' \
     '5b6c0d5334a7bf77dea52b975c5a0c408878c0f7115ed5b6fb151f634b7bf701  Pacifico-Regular.ttf' \
     '8c504d1be20768941ab04251a389ad82d5782d647fa1c4029c811dc5bc2abd59  AllertaStencil-Regular.ttf' \
-    | sha256sum -c -
+    | sha256sum -c -  && chmod 0644 *.ttf
 
 WORKDIR /srv
 # Exact versions with hashes. The top of requirements.txt says how to regenerate it.
@@ -52,7 +52,14 @@ RUN pip install --no-cache-dir --require-hashes --only-binary=:all: -r requireme
 COPY app ./app
 COPY --from=dwg /usr/local/bin/dwg2dxf /usr/local/bin/dwg2dxf
 
-ENV PYTHONUNBUFFERED=1
+# Run as a plain user, not root: dwg2dxf parses untrusted files, and so does everything else in here.
+# It can read the app and the fonts (root-owned, world-readable: ADD <url> makes files 0600, hence the
+# chmod above) and write only to /tmp (DWG temp folders, ezdxf's cache in $HOME). dwg2dxf runs as this
+# same user: handing it to a second user would need root again.
+RUN useradd --uid 10001 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin uml
+USER 10001:10001
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8080
 # One uvicorn worker: it hands each job to a worker process with a time limit (app/runner.py).
 # max_instances in wrangler.jsonc is the scaling knob.

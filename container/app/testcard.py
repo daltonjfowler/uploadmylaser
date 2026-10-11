@@ -15,7 +15,7 @@ from pydantic import Field
 from .geometry.hatch import hatch
 from .models import MachineConfig, OpKind, OpSettings, _Camel
 from .pipeline import estimate_seconds
-from .ruida.encoder import EncLayer, encode_job, machine_converter
+from .ruida.encoder import EncLayer, clamp_settings, encode_job, machine_converter
 
 CELL_MM = 10.0
 GAP_MM = 4.0
@@ -71,8 +71,9 @@ def build_test_card(req: CardRequest) -> CardResponse:
             paths = hatch([sq], req.hatch_mm) if req.op == "engrave" else [sq]
             s = OpSettings(speed_mm_s=speed, power_min_pct=power, power_max_pct=power, passes=1,
                            hatch_mm=req.hatch_mm, air_assist=req.air_assist)
+            s = clamp_settings(s, m)  # encode_job clamps too; the labels must say what the laser really gets
             layers.append((req.op, s, paths))
-            cells.append(CardCell(row=r, col=c, power_pct=power, speed_mm_s=speed))
+            cells.append(CardCell(row=r, col=c, power_pct=s.power_max_pct, speed_mm_s=s.speed_mm_s))
     # corner mark: an L at the top-left, as a light Mark line
     mark = [[(0.0, MARK_MM), (0.0, 0.0), (MARK_MM, 0.0)]]
     layers.insert(0, ("score", OpSettings(speed_mm_s=req.mark_speed_mm_s, power_min_pct=req.mark_power_pct,

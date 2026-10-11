@@ -25,7 +25,8 @@ from .models import _Camel
 MAX_DWG_BYTES = 10 * 1024 * 1024
 MAX_DXF_BYTES = 10 * 1024 * 1024  # the page takes 10 MB of files per design (MAX_UPLOAD_BYTES)
 TIME_LIMIT_S = 20.0  # under the Worker's 30 s
-MEMORY_LIMIT_BYTES = 600 * 1024 * 1024
+# 2 job workers x 512 MB (runner.py) + this must fit the ~1 GiB basic instance as far as possible
+MEMORY_LIMIT_BYTES = 384 * 1024 * 1024
 DWG2DXF = shutil.which("dwg2dxf")
 
 SAVE_AS = "In AutoCAD, use Save As and pick \"AutoCAD 2013 DXF\", then import that file."

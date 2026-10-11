@@ -326,10 +326,11 @@ def join_paths(paths: list[list[Pt]], tol: float = JOIN_TOL_MM) -> list[list[Pt]
         """The same closed shape from any start corner, either way round, gives the same key."""
         body = k[:-1]
         best = None
+        low = min(body)
         for seq in (body, body[::-1]):
-            s0 = min(range(len(seq)), key=lambda i: seq[i:] + seq[:i])
-            cand = seq[s0:] + seq[:s0]
-            best = cand if best is None or cand < best else best
+            for i in (i for i, c in enumerate(seq) if c == low):  # start at the lowest corner
+                cand = seq[i:] + seq[:i]
+                best = cand if best is None or cand < best else best
         return best
 
     seen: set[tuple[tuple[int, int], ...]] = set()

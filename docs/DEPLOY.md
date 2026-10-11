@@ -1,7 +1,7 @@
 # Deploy
 
-Live at **https://uploadmylaser.com** (www redirects to it; `uploadmylaser.<subdomain>.workers.dev` stays on
-as a fallback). Same Cloudflare account as uploadmycode, Workers Paid plan (needed for Containers).
+Live at **https://uploadmylaser.com** (www redirects to it). The workers.dev URL is off
+(`workers_dev: false`): the wrong-try lockouts use the Cache API, which does nothing on workers.dev. Same Cloudflare account as uploadmycode, Workers Paid plan (needed for Containers).
 
 ## Already set up
 - Domain `uploadmylaser.com`: zone on this Cloudflare account. The Worker claims it and `www` as custom
