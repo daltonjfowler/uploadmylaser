@@ -18,6 +18,22 @@ export function cleanPanelName(s: string): string {
   return s.toUpperCase().replace(/[^A-Z0-9 -]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_PANEL_NAME).trim();
 }
 
+/**
+ * A name like `name` that is not in `taken` ("Keep both"): a number on the end, 2 upwards, with the name
+ * cut short so it stays within 8 characters ("DESIGN" -> "DESIGN2", "JOB2" -> "JOB3", "ABCDEFGH" ->
+ * "ABCDEFG2"). Null when every try is taken.
+ */
+export function freePanelName(name: string, taken: Iterable<string>): string | null {
+  const used = new Set(taken);
+  const base = cleanPanelName(name).replace(/\d+$/, '').trim() || 'JOB';
+  for (let n = 2; n < 1000; n++) {
+    const tail = String(n);
+    const v = cleanPanelName(base.slice(0, MAX_PANEL_NAME - tail.length).trim() + tail);
+    if (v !== name && !used.has(v)) return v;
+  }
+  return null;
+}
+
 const hi7 = (n: number) => (n >> 7) & 0x7f;
 const lo7 = (n: number) => n & 0x7f;
 

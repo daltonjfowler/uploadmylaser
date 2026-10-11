@@ -210,6 +210,18 @@
     </form>
   </div>
 
+  <div id="nameDlg" class="gate" hidden>
+    <div class="card" role="alertdialog" aria-modal="true" aria-labelledby="nameDlgTitle" aria-describedby="nameDlgInfo">
+      <h2 id="nameDlgTitle">That name is already on the laser</h2>
+      <p id="nameDlgInfo"></p>
+      <div class="row end">
+        <button type="button" id="nameCancel">Cancel</button>
+        <button type="button" id="nameReplace">Replace it</button>
+        <button type="button" id="nameKeep" class="go">Keep both</button>
+      </div>
+    </div>
+  </div>
+
   <div id="libraryDlg" class="gate" hidden>
     <div class="card wide">
       <div class="dlghead"><h2>Shapes</h2><button type="button" id="libClose">Close</button></div>

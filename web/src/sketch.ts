@@ -25,22 +25,54 @@ export interface DesignPart extends Placement, PartExtras { id: number; source: 
 const PX_MM = 25.4 / 96;
 const UNITS: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: PX_MM, '': PX_MM };
 
-interface FileInfo { data: string; units?: number; w: number; h: number; img: HTMLImageElement | null; dxf: DxfSketch | null; known: boolean }
-const files = new Map<number, FileInfo>();
+/** users: the part ids drawing it. Pattern copies share one file, so they share one FileInfo instead of
+ *  each reading the file again. It is let go when its last part is deleted. */
+interface FileInfo { data: string; units?: number; w: number; h: number; img: HTMLImageElement | null; dxf: DxfSketch | null; known: boolean; users: Set<number> }
+const files = new Map<number, FileInfo>();    // part id -> its file
+const shared = new Map<string, FileInfo[]>(); // file data -> one FileInfo per "I drew in" units
+
+/** A photo's preview is drawn with img.src, so only a picture inside the design itself is used: a web
+ *  address in a .uml file would make the page fetch it. */
+export const safePreview = (v: unknown): v is string => typeof v === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,/i.test(v);
 
 /** Natural size in mm, before scale and rotation. */
 function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => void): FileInfo {
   const cached = files.get(p.id);
   if (cached && cached.data === p.source.data && cached.units === p.source.units) return cached;
-  const { data, fileType, units } = p.source;
-  let info: FileInfo = { data, units, w: 50, h: 50, img: null, dxf: null, known: false };
+  release(p.id);
+  let info = shared.get(p.source.data)?.find((f) => f.units === p.source.units);
+  if (!info) {
+    info = readFileInfo(p.source, onLoad);
+    shared.set(info.data, [...(shared.get(info.data) ?? []), info]);
+  }
+  info.users.add(p.id);
+  files.set(p.id, info);
+  return info;
+}
+
+/** This part no longer draws its file; the file's sketch goes when no part draws it. */
+function release(id: number): void {
+  const f = files.get(id);
+  if (!f) return;
+  files.delete(id);
+  f.users.delete(id);
+  if (f.users.size) return;
+  if (f.img?.src.startsWith('blob:')) URL.revokeObjectURL(f.img.src);
+  const rest = (shared.get(f.data) ?? []).filter((x) => x !== f);
+  if (rest.length) shared.set(f.data, rest);
+  else shared.delete(f.data);
+}
+
+function readFileInfo(src: DesignPart['source'] & { kind: 'file' }, onLoad: () => void): FileInfo {
+  const { data, fileType, units } = src;
+  let info: FileInfo = { data, units, w: 50, h: 50, img: null, dxf: null, known: false, users: new Set() };
   if (fileType === 'pbm') {
     const size = pbmSize(data);
     if (size) info = { ...info, w: size[0], h: size[1], known: true };
-    if (p.source.preview) {
+    if (safePreview(src.preview)) {
       const img = new Image();
       img.onload = onLoad;
-      img.src = p.source.preview;
+      img.src = src.preview;
       info.img = img;
     }
   } else if (fileType === 'svg') {
@@ -65,7 +97,6 @@ function fileInfo(p: DesignPart & { source: { kind: 'file' } }, onLoad: () => vo
       if (size) info = { ...info, w: size[0], h: size[1], known: true };
     }
   }
-  files.set(p.id, info);
   return info;
 }
 
@@ -165,9 +196,13 @@ export function localView(p: DesignPart, onLoad: () => void): PartView {
   return view;
 }
 
-/** Forget a deleted part's cached image. */
+/** Forget a deleted part's cached image (kept while a copy of the same file still uses it). */
 export function dropLocal(id: number): void {
-  const f = files.get(id);
-  if (f?.img) URL.revokeObjectURL(f.img.src);
-  files.delete(id);
+  release(id);
+}
+
+/** Forget every part not in `ids` (after Undo or Open, parts go without being deleted one by one). */
+export function keepLocal(ids: Iterable<number>): void {
+  const keep = new Set(ids);
+  for (const id of [...files.keys()]) if (!keep.has(id)) release(id);
 }

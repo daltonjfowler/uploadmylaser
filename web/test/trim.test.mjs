@@ -56,3 +56,21 @@ test('touching at a line end is not a crossing that splits it', () => {
 test('nothing within reach: no hit', () => {
   assert.equal(nearestLine([{ kind: 'cut', pts: [[0, 0], [10, 0]] }], [5, 5], 1), null);
 });
+
+// Dalton's rule: hidden colours still run on the laser, so Trim must keep them.
+import { nearestShown } from '../src/trim.ts';
+
+test('a hidden colour cannot be clicked, and trimming another line keeps it', () => {
+  const lines = [
+    { kind: 'score', pts: [[0, 1], [100, 1]] }, // hidden, right under the click
+    { kind: 'cut', pts: [[0, 0], [100, 0]] },
+    { kind: 'engrave', pts: [[0, 50], [100, 50]] }, // hidden, far away
+  ];
+  const hidden = new Set(['score', 'engrave']);
+  const hit = nearestShown(lines, [45, 1], 2, hidden);
+  assert.equal(hit.line, 1, 'the cut line, by its index among ALL lines');
+  const { keep } = trim(lines, hit, [[[30, -10], [30, 10]], [[60, -10], [60, 10]]]);
+  assert.deepEqual(keep.filter((l) => l.kind !== 'cut'), [lines[0], lines[2]], 'hidden lines kept as they were');
+  assert.equal(keep.filter((l) => l.kind === 'cut').length, 2, 'the cut line lost its middle');
+  assert.equal(nearestShown(lines, [45, 50], 2, hidden), null, 'only a hidden line there: nothing to click');
+});

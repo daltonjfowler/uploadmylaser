@@ -146,25 +146,38 @@ export class LaserLink {
     await this.exclusive(() => this.stream(bytes, onProgress));
   }
 
+  /** The file names stored on the controller, slot 1 first. Read only: the page asks the student before
+   *  it replaces one, because a name that is already there may be another student's waiting job. */
+  async listNames(): Promise<string[]> {
+    return this.exclusive(() => this.fileNames());
+  }
+
   /**
    * Send to panel: store the job in the controller's file list under `name`. If that name is already
-   * stored, delete that one file first so the list keeps one copy. The delete is by slot number, so the
-   * slot is read again right before it. Returns whether an old file was replaced.
+   * stored, it is deleted first ONLY when `replace` is true (the student pressed Replace); otherwise
+   * nothing is deleted and this throws. The delete is by slot number, so the slot is read again right
+   * before it. STOP at any point before the delete means no delete. Returns whether an old file was replaced.
    */
-  async sendToPanel(job: Uint8Array, name: string, onProgress?: (sent: number, total: number) => void): Promise<boolean> {
+  async sendToPanel(job: Uint8Array, name: string, opts: { replace?: boolean; onProgress?: (sent: number, total: number) => void } = {}): Promise<boolean> {
     const prefix = swizzle(namePacket(name), this.opts.magic); // throws on a bad name, before anything is sent
+    const stopped = () => { if (this.abort) throw new Error('Stopped.'); };
     return this.exclusive(async () => {
       const slot = (await this.fileNames()).indexOf(name) + 1;
+      stopped();
       if (slot > 0) {
+        // the list changed since the student was asked: never delete without asking
+        if (!opts.replace) throw new Error(`A file called ${name} is already on the laser. Press Send again to choose what to do.`);
         const again = await this.ask(readFileName(slot), (r) => (r.kind === 'name' && r.slot === slot ? r.name : undefined));
+        stopped();
         if (again !== name) throw new Error('The list of files on the laser changed. Press Send again.');
+        stopped();
         await this.writer!.write(swizzle(deleteOneFile(slot), this.opts.magic));
         await new Promise((r) => setTimeout(r, 500)); // give the controller a moment to finish the delete
       }
       const all = new Uint8Array(prefix.length + job.length);
       all.set(prefix);
       all.set(job, prefix.length);
-      await this.stream(all, onProgress);
+      await this.stream(all, opts.onProgress);
       return slot > 0;
     });
   }
@@ -175,6 +188,7 @@ export class LaserLink {
     if (count > MAX_FILES) throw new Error(NO_REPLY);
     const names: string[] = [];
     for (let i = 1; i <= count; i++) {
+      if (this.abort) throw new Error('Stopped.');
       names.push(await this.ask(readFileName(i), (r) => (r.kind === 'name' && r.slot === i ? r.name : undefined)));
     }
     return names;
@@ -231,11 +245,16 @@ export class LaserLink {
     for (const r of replies) this.onReply?.(r);
   }
 
-  /** Stop streaming and tell the controller to abort the running job. */
-  async stop(): Promise<void> {
+  /**
+   * Stop streaming and tell the controller to abort the running job. True once STOP is handed to the OS;
+   * false when it could not be (not connected, or still queued after `waitMs` behind a write that hardware
+   * flow control is holding): then only the laser's own E-stop button is sure. Throws if the write failed.
+   */
+  async stop(waitMs = 1000): Promise<boolean> {
     this.abort = true;
-    if (!this.writer) return;
-    await this.writer.write(swizzle(STOP_PROCESS, this.opts.magic));
+    if (!this.writer) return false;
+    const sent = this.writer.write(swizzle(STOP_PROCESS, this.opts.magic)).then(() => true);
+    return Promise.race([sent, new Promise<boolean>((r) => setTimeout(() => r(false), waitMs))]);
   }
 
   async disconnect(): Promise<void> {

@@ -90,8 +90,8 @@ $('send').onclick = async () => {
 
 $('stop').onclick = async () => {
   try {
-    await link?.stop();
-    log('STOP sent (D8 01)');
+    if ((await link?.stop()) === false) log('STOP not sent within 1 s (stuck write?). Use the machine\'s E-stop!');
+    else log('STOP sent (D8 01)');
   } catch (e) {
     log(`STOP failed: ${(e as Error).message}. Use the machine's E-stop!`);
   }

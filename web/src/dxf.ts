@@ -33,6 +33,9 @@ export function binaryStringToBytes(s: string): Uint8Array {
 export const UNIT_MM: Record<number, number> = { 0: 1, 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 8: 0.0000254, 9: 0.0254, 10: 914.4, 13: 0.001, 14: 100 };
 const MAX_POINTS = 200_000; // a sketch, not the job: stop drawing well before a Chromebook struggles
 const MAX_DEPTH = 8;
+/** Entities visited, every block copy counted: a grid of blocks that hold only text makes no points at
+ *  all, so MAX_POINTS alone never stopped it (nested MINSERTs could freeze the tab). Exported for tests. */
+export const MAX_STEPS = 500_000;
 
 type Pt = [number, number];
 type Tag = [number, string];
@@ -289,9 +292,11 @@ function shapes(e: Ent): Pt[][] {
 function outlines(doc: Doc, ents: Ent[]): Pt[][] {
   const out: Pt[][] = [];
   let count = 0;
+  let steps = 0;
+  const full = () => count > MAX_POINTS || steps > MAX_STEPS;
   const walk = (list: Ent[], xf: Xf, depth: number, parentLayer: string) => {
     for (const e of list) {
-      if (count > MAX_POINTS) return;
+      if (++steps > MAX_STEPS || count > MAX_POINTS) return;
       let layer = str(e.tags, 8) || '0';
       if (layer === '0' && parentLayer) layer = parentLayer;
       if (doc.hidden.has(layer)) continue;
@@ -308,6 +313,7 @@ function outlines(doc: Doc, ents: Ent[]): Pt[][] {
         const [cs, rs] = [num(e.tags, 44), num(e.tags, 45)];
         for (let row = 0; row < rows; row++) {
           for (let col = 0; col < cols; col++) {
+            if (++steps > MAX_STEPS || full()) return; // an empty block still costs a step per copy
             const inner: Xf = ([x, y]) => {
               const [u, v] = [(x - b.base[0]) * sx + col * cs, (y - b.base[1]) * sy + row * rs];
               return xf([mirror * (px + u * c - v * s), py + u * s + v * c]);

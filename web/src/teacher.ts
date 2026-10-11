@@ -331,7 +331,7 @@ function renderMachine(): void {
   l3.append('Send ');
   const s3 = document.createElement('select');
   s3.add(new Option('runs the job, waiting for Start on the panel', 'off', false, !machine.sendToPanel));
-  s3.add(new Option('stores it by name in the panel file list (replaces the same name)', 'on', false, !!machine.sendToPanel));
+  s3.add(new Option('stores it by name in the panel file list (asks before replacing the same name)', 'on', false, !!machine.sendToPanel));
   s3.onchange = () => (machine.sendToPanel = s3.value === 'on');
   l3.append(s3);
   box.append(l, l2, l3);
@@ -420,7 +420,8 @@ $('tcSend').onclick = async () => {
   if (!card || !link?.connected) return;
   try {
     $('tcMsg').textContent = 'Sending…';
-    await link.sendToPanel(fromBase64(card.rd), cleanPanelName('TESTCARD'));
+    // the teacher's own test card: a new one replaces the last one, as the setting says
+    await link.sendToPanel(fromBase64(card.rd), cleanPanelName('TESTCARD'), { replace: true });
     $('tcMsg').textContent = 'Loaded on the laser as TESTCARD. Pick it on the panel, Frame, then Start.';
   } catch (e) {
     $('tcMsg').textContent = (e as Error).message;
@@ -429,8 +430,9 @@ $('tcSend').onclick = async () => {
 
 $('tcStop').onclick = async () => {
   try {
-    await link?.stop();
-    $('tcMsg').textContent = 'Stop sent.';
+    // false: STOP is stuck behind a write the USB port is holding
+    if ((await link?.stop()) === false) $('tcMsg').textContent = 'Could not send STOP. Press the red E-stop button on the laser!';
+    else $('tcMsg').textContent = 'Stop sent.';
   } catch {
     $('tcMsg').textContent = 'Could not send STOP. Press the red E-stop button on the laser!';
   }

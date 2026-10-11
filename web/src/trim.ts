@@ -30,6 +30,15 @@ export function nearestLine(lines: TrimLine[], p: Pt, tol: number): TrimHit | nu
   return best;
 }
 
+/** nearestLine among the lines on screen only (colours in `hidden` can't be clicked). The hit's `line` is an
+ *  index into all of `lines`, so trim() keeps the hidden lines: they still run on the laser. */
+export function nearestShown(lines: TrimLine[], p: Pt, tol: number, hidden: ReadonlySet<OpKind>): TrimHit | null {
+  const shown: number[] = [];
+  lines.forEach((l, i) => { if (!hidden.has(l.kind)) shown.push(i); });
+  const hit = nearestLine(shown.map((i) => lines[i]), p, tol);
+  return hit && { ...hit, line: shown[hit.line] };
+}
+
 type Box = [number, number, number, number];
 function boxOf(pts: Pt[]): Box {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

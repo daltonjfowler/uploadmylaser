@@ -47,3 +47,24 @@ test('replies are parsed, even when split across reads', () => {
   // A lone first byte waits for more.
   assert.equal(parseReplies(Uint8Array.of(0xda)).used, 0);
 });
+
+// "Keep both": a free name next to a taken one, within the controller's 8 characters.
+const { freePanelName } = await import('../src/ruida/panel.ts');
+
+test('Keep both picks a free name: a number on the end, still 8 characters at most', () => {
+  assert.equal(freePanelName('DESIGN', ['DESIGN']), 'DESIGN2');
+  assert.equal(freePanelName('DESIGN', ['DESIGN', 'DESIGN2', 'DESIGN3']), 'DESIGN4');
+  assert.equal(freePanelName('JOB2', ['JOB2']), 'JOB3'); // counts on, not JOB22
+  assert.equal(freePanelName('ABCDEFGH', ['ABCDEFGH']), 'ABCDEFG2');
+  const many = ['ABCDEFGH', ...Array.from({ length: 8 }, (_, i) => `ABCDEFG${i + 2}`)];
+  assert.equal(freePanelName('ABCDEFGH', many), 'ABCDEF10');
+  assert.equal(freePanelName('AB CDEFG', ['AB CDEFG']), 'AB CDEF2');
+  assert.equal(freePanelName('ABCDEF G', ['ABCDEF G']), 'ABCDEF2'); // no space before the number
+  for (const n of ['DESIGN2', 'ABCDEF10', 'ABCDEF2']) assert.equal(namePacket(n).length > 0, true);
+});
+
+test('Keep both never returns the taken name, and gives up rather than guess', () => {
+  const taken = ['X', ...Array.from({ length: 998 }, (_, i) => `X${i + 2}`)];
+  assert.equal(freePanelName('X', taken), null);
+  assert.equal(freePanelName('X', []), 'X2');
+});

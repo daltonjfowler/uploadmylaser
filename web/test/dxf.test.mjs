@@ -76,3 +76,19 @@ test('MINSERT draws every copy in its grid', () => {
 test('a block in a rotated, unevenly scaled block lands where AutoCAD draws it', () => {
   sameBox(boxOf(sketchDxf(fixture('nested-skew.dxf'))), [570.4, 281.13, 651.86, 378.45], 'skew');
 });
+
+// A grid of grids of blocks that hold only text makes no points, so the point limit never stopped it.
+test('nested MINSERTs of text-only blocks stop at the step budget instead of freezing the tab', () => {
+  const tags = (pairs) => pairs.map(([c, v]) => `${c}\n${v}`).join('\n');
+  const block = (name, body) => tags([[0, 'BLOCK'], [2, name], [10, 0], [20, 0]]) + '\n' + body + '\n' + tags([[0, 'ENDBLK']]);
+  const minsert = (name) => tags([[0, 'INSERT'], [2, name], [10, 0], [20, 0], [70, 100], [71, 100], [44, 1], [45, 1]]);
+  const text = Array.from({ length: 50 }, () => tags([[0, 'TEXT'], [8, '0'], [10, 0], [20, 0], [1, 'HI']])).join('\n');
+  const blocks = [block('T', text), block('B1', minsert('T')), block('B2', minsert('B1')), block('B3', minsert('B2'))].join('\n');
+  const dxf = [
+    tags([[0, 'SECTION'], [2, 'BLOCKS']]), blocks, tags([[0, 'ENDSEC']]),
+    tags([[0, 'SECTION'], [2, 'ENTITIES']]), minsert('B3'), tags([[0, 'LINE'], [8, '0'], [10, 0], [20, 0], [11, 5], [21, 5]]), tags([[0, 'ENDSEC'], [0, 'EOF']]),
+  ].join('\n');
+  const t = Date.now();
+  sketchDxf(dxf); // 10^8 copies of 50 texts without a budget
+  assert.ok(Date.now() - t < 3000, `took ${Date.now() - t} ms`);
+});

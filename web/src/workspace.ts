@@ -62,7 +62,7 @@ export interface WorkspaceEvents {
 export type Tool = 'select' | 'line' | 'curve' | 'trim';
 
 /** A local, not-yet-processed change to one part: its geometry is drawn mapped from `from` onto `to`. */
-interface Live { ids: number[]; from: Box; to: Box }
+interface Live { ids: number[]; has: Set<number>; from: Box; to: Box }
 
 /** Size labels: width, height, a circle's diameter, a line's length. */
 export type Dim = 'w' | 'h' | 'd' | 'len';
@@ -84,6 +84,7 @@ export class Workspace {
   private selected: number | null = null;
   /** Several parts selected (Ctrl+A, Shift+click): they move together; resizing is for one part. */
   private group: number[] = [];
+  private inGroup = new Set<number>(); // `group` as a Set: 5000 selected parts made includes() slow
   private jobBox: Box | null = null;
   private jobBad = false;
   private headDot = true;
@@ -255,6 +256,7 @@ export class Workspace {
 
   setGroup(ids: number[]): void {
     this.group = ids;
+    this.inGroup = new Set(ids);
     this.draw();
   }
 
@@ -351,9 +353,7 @@ export class Workspace {
 
   /** The box around every selected part (optionally where a live drag has them). */
   private groupBox(live: boolean): Box | null {
-    const bs = this.parts.filter((p) => this.group.includes(p.id)).map((p) => (live ? this.liveBox(p) : p.box)).filter((b): b is Box => !!b);
-    if (!bs.length) return null;
-    return [Math.min(...bs.map((b) => b[0])), Math.min(...bs.map((b) => b[1])), Math.max(...bs.map((b) => b[2])), Math.max(...bs.map((b) => b[3]))];
+    return union(this.parts.filter((p) => this.inGroup.has(p.id)).map((p) => (live ? this.liveBox(p) : p.box)));
   }
 
   private hit(x: number, y: number): Handle | 'grip' | null {
@@ -386,7 +386,7 @@ export class Workspace {
       if (d < bestD) [best, bestD] = [under[i], d];
     }
     if (best) return best;
-    const sel = under.find((p) => p.id === this.selected || this.group.includes(p.id));
+    const sel = under.find((p) => p.id === this.selected || this.inGroup.has(p.id));
     if (sel) return sel;
     const area = (p: PartView) => (p.box![2] - p.box![0]) * (p.box![3] - p.box![1]);
     return under.reduce((a, b) => (area(b) <= area(a) ? b : a));
@@ -431,7 +431,7 @@ export class Workspace {
     if (e.button === 2) {
       this.pointers.delete(e.pointerId);
       const under = this.partAt(p.mx, p.my);
-      if (under?.box && under.id !== this.selected && !this.group.includes(under.id)) this.ev.onSelect(under.id);
+      if (under?.box && under.id !== this.selected && !this.inGroup.has(under.id)) this.ev.onSelect(under.id);
       const r = this.canvas.getBoundingClientRect();
       this.ev.onMenu({ x: r.left + p.x, y: r.top + p.y });
       return;
@@ -466,14 +466,14 @@ export class Workspace {
       this.ev.onToggle(part.id);
       return;
     }
-    if (part?.box && gbox && this.group.includes(part.id)) {
+    if (part?.box && gbox && this.inGroup.has(part.id)) {
       this.gesture = { kind: 'move', ids: [...this.group], box: gbox, startX: p.mx, startY: p.my };
       return;
     }
     if (part?.box) {
       if (part.id !== this.selected) this.ev.onSelect(part.id);
       // a grouped part selects its whole group, which then moves together
-      const gb = this.group.length > 1 && this.group.includes(part.id) ? this.groupBox(false) : null;
+      const gb = this.group.length > 1 && this.inGroup.has(part.id) ? this.groupBox(false) : null;
       this.gesture = gb
         ? { kind: 'move', ids: [...this.group], box: gb, startX: p.mx, startY: p.my }
         : { kind: 'move', ids: [part.id], box: part.box, startX: p.mx, startY: p.my };
@@ -540,9 +540,11 @@ export class Workspace {
       const dx = p.mx - gs.startX;
       const dy = p.my - gs.startY;
       const [x0, y0, x1, y1] = gs.box;
-      this.live = { ids: gs.ids, from: gs.box, to: [x0 + dx, y0 + dy, x1 + dx, y1 + dy] };
+      const has = this.live?.ids === gs.ids ? this.live.has : new Set(gs.ids);
+      this.live = { ids: gs.ids, has, from: gs.box, to: [x0 + dx, y0 + dy, x1 + dx, y1 + dy] };
     } else {
-      this.live = { ids: gs.ids, from: gs.box, to: resized(gs.box, gs.handle, p.mx, p.my, this.ev.isLocked() !== e.shiftKey) };
+      const has = this.live?.ids === gs.ids ? this.live.has : new Set(gs.ids);
+      this.live = { ids: gs.ids, has, from: gs.box, to: resized(gs.box, gs.handle, p.mx, p.my, this.ev.isLocked() !== e.shiftKey) };
     }
     this.draw();
   };
@@ -816,15 +818,13 @@ export class Workspace {
 
   private liveJobBox(): Box | null {
     if (!this.live) return this.jobBox;
-    const boxes = this.parts.map((p) => this.liveBox(p)).filter((b): b is Box => !!b);
-    if (!boxes.length) return null;
-    return [Math.min(...boxes.map((b) => b[0])), Math.min(...boxes.map((b) => b[1])), Math.max(...boxes.map((b) => b[2])), Math.max(...boxes.map((b) => b[3]))];
+    return union(this.parts.map((p) => this.liveBox(p)));
   }
 
   private liveBox(p: PartView): Box | null {
     if (!p.box) return null;
     const lv = this.live;
-    if (!lv || !lv.ids.includes(p.id)) return p.box;
+    if (!lv || !lv.has.has(p.id)) return p.box;
     const [a, b] = [lv.from, lv.to];
     const kx = (b[2] - b[0]) / Math.max(a[2] - a[0], 1e-6);
     const ky = (b[3] - b[1]) / Math.max(a[3] - a[1], 1e-6);
@@ -839,7 +839,7 @@ export class Workspace {
     const lb = this.liveBox(p)!;
     // off screen (zoomed in on a big floor plan): nothing to draw
     if (ox + lb[2] * s < -4 || ox + lb[0] * s > this.cw + 4 || oy + lb[3] * s < -4 || oy + lb[1] * s > this.ch + 4) return;
-    const lv = this.live?.ids.includes(p.id) ? this.live : null;
+    const lv = this.live?.has.has(p.id) ? this.live : null;
     // bed mm → screen, including a live move/resize (the from box mapped onto the to box)
     const [a, b] = lv ? [lv.from, lv.to] : [p.box, p.box];
     const kx = (b[2] - b[0]) / Math.max(a[2] - a[0], 1e-6);
@@ -892,7 +892,7 @@ export class Workspace {
       // each selected part gets its own thin outline inside the group box
       const { s, ox, oy } = this.view;
       for (const p of this.parts) {
-        const b = this.group.includes(p.id) ? this.liveBox(p) : null;
+        const b = this.inGroup.has(p.id) ? this.liveBox(p) : null;
         if (b) g.strokeRect(ox + b[0] * s - 2, oy + b[1] * s - 2, (b[2] - b[0]) * s + 4, (b[3] - b[1]) * s + 4);
       }
     }
@@ -1090,6 +1090,16 @@ export class Workspace {
 
 /** The box after dragging handle `h` to (mx, my): the opposite side stays put. A side handle stretches
  *  only its own axis; a corner keeps the shape when `uniform` (the lock). */
+/** The box around `boxes` (nulls skipped). A loop, not Math.min(...): thousands of boxes overflow the stack. */
+function union(boxes: (Box | null)[]): Box | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of boxes) {
+    if (!b) continue;
+    x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]);
+  }
+  return x0 <= x1 ? [x0, y0, x1, y1] : null;
+}
+
 function resized(b: Box, h: Handle, mx: number, my: number, uniform: boolean): Box {
   const [x0, y0, x1, y1] = b;
   const w = Math.max(x1 - x0, 0.01);

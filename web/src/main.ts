@@ -12,19 +12,20 @@ import type {
 import { DXF_UNITS, MAX_PARTS, MAX_UPLOAD_BYTES, TEXT_FONTS } from '../../shared/contracts';
 import { ApiError, checkPhrase, convertDwg, getMachine, getMaterials, getPhrase, processDesign, setPhrase, type PublicMachine } from './api';
 import { OP_COLORS, OP_LABELS, RUN_ORDER } from './ops';
-import { cleanPanelName } from './ruida/panel';
+import { cleanPanelName, freePanelName } from './ruida/panel';
+import { deviceId } from './device';
 import { fromBase64 } from './ruida/swizzle';
 import { choosePort, LaserLink, type PortId } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
-import { nearestLine, trim, type TrimHit, type TrimLine } from './trim';
+import { nearestShown, trim, type TrimHit, type TrimLine } from './trim';
 import { zip } from './zip';
 import { boxPanels, outsideSize } from './boxmaker';
 import { adjust, runCount, toDots, toPbm } from './photo';
 import { bounds, pointCount, toDxf, trace, type Pt as TracePt } from './trace';
 import { binaryStringToBytes, bytesToBinaryString, dxfFlavour, dxfUnitsCode, sketchDxf, UNIT_MM as DXF_UNIT_MM } from './dxf';
-import { dropLocal, localView, type DesignPart, type Source } from './sketch';
+import { dropLocal, keepLocal, localView, safePreview, type DesignPart, type Source } from './sketch';
 import { initThemeButton } from './theme';
 import { cadAngle, Workspace, type Box, type Dim, type PartView, type Tool } from './workspace';
 
@@ -119,7 +120,10 @@ async function init(): Promise<void> {
   }
   lastSnap = snap();
   renderHistoryButtons();
-  if (!materials.some((m) => m.id === materialId)) materialId = materials.length === 1 ? materials[0].id : '';
+  if (!materials.some((m) => m.id === materialId)) {
+    materialId = materials.length === 1 ? materials[0].id : '';
+    powerChoice = {}; // the saved depth was for another material
+  }
   applyUnits();
   renderPalette();
   if (!LaserLink.supported()) $('status').textContent = 'Use Chrome to connect the laser';
@@ -143,8 +147,15 @@ $<HTMLFormElement>('gateForm').onsubmit = async (ev) => {
 
 // ---------- parts ----------
 
+/** Parts by id, rebuilt when `parts` is replaced or grows or shrinks (a 5000-piece design looked parts up
+ *  one by one in loops over every part). */
+let byId: { of: DesignPart[]; n: number; map: Map<number, DesignPart> } | null = null;
 function find(id: number | null): DesignPart | undefined {
-  return parts.find((p) => p.id === id);
+  if (id === null) return undefined;
+  if (!byId || byId.of !== parts || byId.n !== parts.length) byId = { of: parts, n: parts.length, map: new Map(parts.map((p) => [p.id, p])) };
+  const p = byId.map.get(id);
+  if (p && p.id === id) return p;
+  return p ? parts.find((q) => q.id === id) : undefined; // an id changed in place: look the slow way
 }
 
 /** The server's geometry for a part if it has it, otherwise the browser's own sketch. */
@@ -171,7 +182,27 @@ const viewCache = new Map<string, PartView>();
 /** The colours the server found in each file (by its data), kept across results for the same reason. */
 const knownColors = new Map<string, { key: string; kind: OpKind | null }[]>();
 const dataIds = new Map<string, number>();
+let nextDataId = 0; // never reused, even after dataIds is emptied
+// The caches are emptied when they get big. Counting entries alone did not bound memory: one entry can be a
+// floor plan's lines, and a key can be a deleted 10 MB file that the cache alone keeps alive.
 const CACHE_MAX = 20000;
+const CACHE_POINTS = 1_000_000;  // points in viewCache (one result more can be added after the check)
+const CACHE_CHARS = 30_000_000;  // characters of file data held as keys by dataIds, and by knownColors
+let cachePoints = 0;
+let dataChars = 0;
+let colorChars = 0;
+
+function cacheView(sig: string, v: PartView): void {
+  for (const l of v.layers) for (const path of l.paths) cachePoints += path.length;
+  for (const path of v.unassigned ?? []) cachePoints += path.length;
+  viewCache.set(sig, v);
+}
+
+function setKnownColors(data: string, list: { key: string; kind: OpKind | null }[]): void {
+  if (knownColors.size >= CACHE_MAX || colorChars > CACHE_CHARS) { knownColors.clear(); colorChars = 0; }
+  if (!knownColors.has(data)) colorChars += data.length;
+  knownColors.set(data, list);
+}
 
 function sigCtx(): string {
   return JSON.stringify([materialId, colorMap, powerChoice, joinLines]);
@@ -182,7 +213,10 @@ function partSig(p: DesignPart, ctx: string): string {
   let src: unknown = source;
   if (source.kind === 'file') {
     let n = dataIds.get(source.data);
-    if (n === undefined) dataIds.set(source.data, n = dataIds.size);
+    if (n === undefined) {
+      dataIds.set(source.data, n = nextDataId++);
+      dataChars += source.data.length;
+    }
     src = { ...source, data: n, preview: undefined };
   }
   return `${ctx}|${JSON.stringify(placement)}|${JSON.stringify(src)}`;
@@ -190,12 +224,19 @@ function partSig(p: DesignPart, ctx: string): string {
 
 /** Keep the parts' views and file colours from a fresh result (sigs made when the request was built). */
 function remember(res: ProcessResponse, ids: number[], sigs: string[]): void {
-  if (viewCache.size > CACHE_MAX || dataIds.size > CACHE_MAX) { viewCache.clear(); dataIds.clear(); }
+  // The numbers in viewCache's keys come from dataIds, so the two are emptied together. Numbers are never
+  // reused (nextDataId), so `sigs`, made before this, can never match a different file afterwards.
+  if (viewCache.size > CACHE_MAX || dataIds.size > CACHE_MAX || cachePoints > CACHE_POINTS || dataChars > CACHE_CHARS) {
+    viewCache.clear();
+    dataIds.clear();
+    cachePoints = 0;
+    dataChars = 0;
+  }
   const ix = resultIndex();
   ids.forEach((id, i) => {
     const box = res.partBoxes[i];
     // copies of the layers: moving a part shifts the result's own lines in place
-    if (box) viewCache.set(sigs[i], { id, box, layers: ix.layers[i].map((l) => ({ ...l })), unassigned: ix.unassigned[i].flatMap((u) => u.paths) });
+    if (box) cacheView(sigs[i], { id, box, layers: ix.layers[i].map((l) => ({ ...l })), unassigned: ix.unassigned[i].flatMap((u) => u.paths) });
   });
   const found = new Map<number, { key: string; kind: OpKind | null }[]>();
   for (const c of res.partColors ?? []) {
@@ -205,9 +246,8 @@ function remember(res: ProcessResponse, ids: number[], sigs: string[]): void {
   }
   for (const [i, list] of found) {
     const q = find(ids[i]);
-    if (q?.source.kind === 'file') knownColors.set(q.source.data, list);
+    if (q?.source.kind === 'file') setKnownColors(q.source.data, list);
   }
-  if (knownColors.size > CACHE_MAX) knownColors.clear();
 }
 
 function viewOf(p: DesignPart): PartView {
@@ -231,10 +271,14 @@ function boxOf(id: number): Box | null {
   return p ? viewOf(p).box : null;
 }
 
+/** A loop, not Math.min(...): spreading thousands of boxes can overflow the stack. */
 function unionBox(boxes: (Box | null)[]): Box | null {
-  const bs = boxes.filter((b): b is Box => !!b);
-  if (!bs.length) return null;
-  return [Math.min(...bs.map((b) => b[0])), Math.min(...bs.map((b) => b[1])), Math.max(...bs.map((b) => b[2])), Math.max(...bs.map((b) => b[3]))];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const b of boxes) {
+    if (!b) continue;
+    x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]);
+  }
+  return x0 <= x1 ? [x0, y0, x1, y1] : null;
 }
 
 /** New parts go just left of the design (Import), or near the bed's top-right corner if it's empty. */
@@ -245,7 +289,7 @@ function newSpot(): { xMm: number; yMm: number } {
   // Left of the newest part; when that would run off the bed (allowing ~50 mm for the new part),
   // start a new row under everything, back at the right-hand side.
   if (last[0] - 10 - 50 >= 0) return { xMm: round(last[0] - 10), yMm: round(last[1]) };
-  return { xMm: machine.bedWidthMm - 10, yMm: round(Math.max(...boxes.map((b) => b[3])) + 10) };
+  return { xMm: machine.bedWidthMm - 10, yMm: round((unionBox(boxes)?.[3] ?? 0) + 10) };
 }
 
 function addPart(source: Source, at?: { xMm: number; yMm: number }): void {
@@ -268,7 +312,8 @@ function selection(): number[] {
 function deleteSelected(): void {
   const ids = selection();
   if (!ids.length) return;
-  parts = parts.filter((p) => !ids.includes(p.id));
+  const gone = new Set(ids);
+  parts = parts.filter((p) => !gone.has(p.id));
   ids.forEach(dropLocal);
   select(null);
   changed();
@@ -283,7 +328,8 @@ function selectAll(): void {
 /** These parts plus every part grouped with any of them. */
 function withGroups(ids: number[]): number[] {
   const gids = new Set(ids.map((id) => find(id)?.groupId).filter((g) => g !== undefined));
-  return parts.filter((p) => ids.includes(p.id) || (p.groupId !== undefined && gids.has(p.groupId))).map((p) => p.id);
+  const has = new Set(ids);
+  return parts.filter((p) => has.has(p.id) || (p.groupId !== undefined && gids.has(p.groupId))).map((p) => p.id);
 }
 
 function toggleSelect(id: number): void {
@@ -319,7 +365,7 @@ function moveParts(ids: number[], dx: number, dy: number): void {
   }
   jobBoxNow();
   ws.clearLive();
-  changed();
+  changed({ exact: true });
 }
 
 /** Each part's box is mapped from the old selection box onto the new one, so a group keeps its
@@ -414,8 +460,13 @@ function hasServerView(id: number): boolean {
   return i >= 0 && !!result?.partBoxes[i];
 }
 
-async function readFile(f: File): Promise<Source | null> {
-  const used = parts.reduce((n, p) => n + (p.source.kind === 'file' ? p.source.data.length : 0), 0);
+/** `replace`: Open, so the design on the workspace now is about to go and does not count toward the limit. */
+async function readFile(f: File, replace = false): Promise<Source | null> {
+  let used = 0;
+  if (!replace) { // pattern copies share one upload, so each file counts once
+    const seen = new Set<string>();
+    for (const p of parts) if (p.source.kind === 'file' && !seen.has(p.source.data)) { seen.add(p.source.data); used += p.source.data.length; }
+  }
   if (f.size + used > MAX_UPLOAD_BYTES) {
     notes = ['That file is too big (10 MB max for the whole design).'];
     render();
@@ -579,14 +630,63 @@ const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 function okSource(s: Record<string, unknown>): boolean {
   const t = s.text as Record<string, unknown> | undefined;
   const vb = s.vb as Record<string, unknown> | undefined;
+  const op = (v: unknown) => RUN_ORDER.includes(v as OpKind);
   switch (s.kind) {
     case 'file': return typeof s.name === 'string' && typeof s.data === 'string' && (s.fileType === 'svg' || s.fileType === 'dxf' || s.fileType === 'pbm')
-      && (s.units === undefined || DXF_UNITS.includes(s.units as DxfUnits));
-    case 'text': return !!t && typeof t.value === 'string' && typeof t.font === 'string' && num(t.heightMm) && typeof t.op === 'string';
-    case 'shape': return (s.shape === 'box' || s.shape === 'circle') && num(s.wMm) && num(s.hMm) && typeof s.op === 'string';
-    case 'path': return typeof s.d === 'string' && !!vb && [vb.x, vb.y, vb.w, vb.h].every(num) && num(s.wMm) && num(s.hMm) && typeof s.op === 'string';
+      && (s.units === undefined || DXF_UNITS.includes(s.units as DxfUnits)) && (s.colors === undefined || (!!s.colors && typeof s.colors === 'object' && !Array.isArray(s.colors)));
+    case 'text': return !!t && typeof t === 'object' && typeof t.value === 'string' && typeof t.font === 'string' && num(t.heightMm) && op(t.op);
+    case 'shape': return (s.shape === 'box' || s.shape === 'circle') && num(s.wMm) && num(s.hMm) && op(s.op);
+    case 'path': return typeof s.d === 'string' && !!vb && typeof vb === 'object' && [vb.x, vb.y, vb.w, vb.h].every(num) && num(s.wMm) && num(s.hMm) && op(s.op);
     default: return false;
   }
+}
+
+/** One saved part has what drawing it needs. */
+function okPart(p: unknown): p is DesignPart {
+  const q = p as Record<string, unknown>;
+  const s = q?.source as Record<string, unknown> | undefined;
+  return !!q && typeof q === 'object' && num(q.id) && [q.xMm, q.yMm, q.scale].every(num)
+    && (q.scaleY === undefined || num(q.scaleY)) && (q.groupId === undefined || num(q.groupId))
+    && [0, 90, 180, 270].includes(q.rotateDeg as number) && !!s && typeof s === 'object' && okSource(s);
+}
+
+/** The good parts of a saved list (a .uml file or this browser's copy), at most MAX_PARTS, one per id. A bad
+ *  part is left out instead of breaking every redraw. A photo preview that is not a picture inside the file
+ *  is dropped (the part still works; the server draws it). */
+function cleanParts(list: unknown[]): DesignPart[] {
+  const out: DesignPart[] = [];
+  const ids = new Set<number>();
+  for (const p of list) {
+    if (out.length >= MAX_PARTS) break;
+    if (!okPart(p) || ids.has(p.id)) continue;
+    ids.add(p.id);
+    const s = p.source;
+    if (s.kind === 'file' && s.preview !== undefined && !safePreview(s.preview)) {
+      const { preview: _drop, ...rest } = s;
+      out.push({ ...p, source: rest });
+    } else out.push(p);
+  }
+  return out;
+}
+
+/** A plain object of strings to whatever, or {} (a saved colorMap, powerChoice). */
+const plainObj = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, never> : {});
+
+/** A saved powerChoice: only numbers per colour (the server clamps them to the teacher's range). */
+function cleanPower(v: unknown): Partial<Record<OpKind, number>> {
+  const out: Partial<Record<OpKind, number>> = {};
+  for (const [k, n] of Object.entries(plainObj(v))) if (RUN_ORDER.includes(k as OpKind) && num(n)) out[k as OpKind] = n;
+  return out;
+}
+
+/** The first id after every part id and group id in `ps`, so new parts and groups never reuse one. */
+function idAfter(ps: DesignPart[]): number {
+  let n = 0;
+  for (const p of ps) {
+    n = Math.max(n, p.id);
+    if (p.groupId !== undefined && Number.isFinite(p.groupId)) n = Math.max(n, p.groupId);
+  }
+  return n + 1;
 }
 
 /** A saved design, checked enough that a broken or odd file can't break the page (the server checks the rest). */
@@ -595,16 +695,9 @@ function readDesign(text: string): { parts: DesignPart[]; materialId: string; co
   try { d = JSON.parse(text); } catch { return null; }
   const o = d as Record<string, unknown>;
   if (!o || o.kind !== DESIGN_KIND || !Array.isArray(o.parts)) return null;
-  const okPart = (p: unknown): p is DesignPart => {
-    const q = p as Record<string, unknown>;
-    const s = q?.source as Record<string, unknown> | undefined;
-    return !!q && typeof q.id === 'number' && [q.xMm, q.yMm, q.scale].every((v) => typeof v === 'number' && Number.isFinite(v))
-      && [0, 90, 180, 270].includes(q.rotateDeg as number) && !!s && okSource(s);
-  };
-  const ps = o.parts.filter(okPart).slice(0, MAX_PARTS);
+  const ps = cleanParts(o.parts);
   if (!ps.length) return null;
-  const plain = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, never> : {});
-  return { parts: ps, materialId: typeof o.materialId === 'string' ? o.materialId : '', colorMap: plain(o.colorMap), powerChoice: plain(o.powerChoice) };
+  return { parts: ps, materialId: typeof o.materialId === 'string' ? o.materialId : '', colorMap: plainObj(o.colorMap), powerChoice: cleanPower(o.powerChoice) };
 }
 
 /** Put a saved design's parts on the workspace with fresh ids (so Import can add one next to another). */
@@ -623,7 +716,7 @@ function placeDesign(d: NonNullable<ReturnType<typeof readDesign>>, replace: boo
   } else {
     colorMap = { ...d.colorMap, ...colorMap };
   }
-  parts.push(...added);
+  for (const q of added) parts.push(q);
   select(null);
   changed();
   if (replace && d.materialId && !materials.some((m) => m.id === d.materialId)) warn('This design used a material this laser does not have. Pick a material.');
@@ -645,7 +738,7 @@ async function openAny(f: File, replace: boolean): Promise<void> {
     placeDesign(d, replace);
     return;
   }
-  const src = await readFile(f);
+  const src = await readFile(f, replace);
   if (!src) return;
   if (replace) {
     parts = [];
@@ -810,7 +903,8 @@ function ungroup(): void {
     source: { kind: 'file', name: `${name} piece ${k + 1}`, fileType: 'svg', data: pieceSvg(pc) },
     xMm: round(pc.box[2]), yMm: round(pc.box[1]), scale: 1, rotateDeg: 0, // top-right corner, like every part
   }));
-  parts.splice(parts.indexOf(p), 1, ...made);
+  const at = parts.indexOf(p);
+  parts = [...parts.slice(0, at), ...made, ...parts.slice(at + 1)]; // not splice(...made): thousands of pieces overflow the stack
   showPiecesNow(result, made, pieces);
   // nothing selected afterwards: with every piece selected they move as one and look still grouped
   select(null);
@@ -823,6 +917,16 @@ function showPiecesNow(old: ProcessResponse, made: DesignPart[], pieces: Piece[]
   const at = new Map(made.map((q, k) => [q.id, k]));
   const ids: number[] = [];
   const next: ProcessResponse = { ...old, preview: [], unassigned: [], partBoxes: [], partColors: [], rd: null, frameRd: null, warnings: [], errors: [] };
+  // the old result by part index, made once: scanning it for each of thousands of pieces was slow
+  const oldAt = new Map(resultIds.map((id, i) => [id, i]));
+  const bucket = <T extends { part: number }>(list: T[]) => {
+    const m = new Map<number, T[]>();
+    for (const x of list) { let a = m.get(x.part); if (!a) m.set(x.part, a = []); a.push(x); }
+    return m;
+  };
+  const oldPreview = bucket(old.preview);
+  const oldUnassigned = bucket(old.unassigned ?? []);
+  const oldColors = bucket(old.partColors ?? []);
   for (const q of parts) {
     const k = at.get(q.id);
     const n = ids.length;
@@ -837,11 +941,11 @@ function showPiecesNow(old: ProcessResponse, made: DesignPart[], pieces: Piece[]
       }
       next.partBoxes.push(pc.box);
     } else {
-      const i = resultIds.indexOf(q.id);
-      if (i < 0) continue;
-      for (const l of old.preview) if (l.part === i) next.preview.push({ ...l, part: n });
-      for (const u of old.unassigned ?? []) if (u.part === i) next.unassigned.push({ ...u, part: n });
-      for (const c of old.partColors ?? []) if (c.part === i) next.partColors!.push({ ...c, part: n });
+      const i = oldAt.get(q.id);
+      if (i === undefined) continue;
+      for (const l of oldPreview.get(i) ?? []) next.preview.push({ ...l, part: n });
+      for (const u of oldUnassigned.get(i) ?? []) next.unassigned.push({ ...u, part: n });
+      for (const c of oldColors.get(i) ?? []) next.partColors!.push({ ...c, part: n });
       next.partBoxes.push(old.partBoxes[i]);
     }
     ids.push(q.id);
@@ -852,28 +956,41 @@ function showPiecesNow(old: ProcessResponse, made: DesignPart[], pieces: Piece[]
 
 // ---------- trim ----------
 
-interface TrimPlan { p: DesignPart; keep: TrimLine[]; removed: [number, number][][] }
+interface TrimPlan { p: DesignPart; view: PartView; keep: TrimLine[]; removed: [number, number][][] }
 
 /** What a Trim click at (mx, my) would do: the nearest line of any part, cut back to the nearest lines
- *  crossing it (from every part). Works on the lines on screen, so the part needs its laser lines. */
+ *  crossing it (from every part). Works on the lines on screen, so the part needs its laser lines.
+ *  Only a line on screen can be clicked, but the part keeps every line, hidden colours too: they still run. */
 function trimPlan(mx: number, my: number, tol: number): TrimPlan | null {
   const views = parts.map(viewOf);
-  const linesOf = (v: PartView) => v.layers.filter((l) => !hiddenOps.has(l.kind)).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
   let best: { k: number; lines: TrimLine[]; hit: TrimHit } | null = null;
   views.forEach((v, k) => {
     const b = v.box;
     if (!b || mx < b[0] - tol || mx > b[2] + tol || my < b[1] - tol || my > b[3] + tol) return;
-    const lines = linesOf(v);
-    const hit = nearestLine(lines, [mx, my], tol);
+    const lines = v.layers.flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
+    const hit = nearestShown(lines, [mx, my], tol, hiddenOps);
     if (hit && (!best || hit.d <= best.hit.d)) best = { k, lines, hit };
   });
   if (!best) return null;
   const { k, lines, hit } = best as { k: number; lines: TrimLine[]; hit: TrimHit };
   const pts = lines[hit.line].pts;
   const [x0, y0, x1, y1] = boundsOf([pts]);
-  const cutters = views.filter((v) => v.box && v.box[0] <= x1 && v.box[2] >= x0 && v.box[1] <= y1 && v.box[3] >= y0)
-    .flatMap((v) => [...v.layers.flatMap((l) => l.paths), ...(v.unassigned ?? [])]);
-  return { p: parts[k], ...trim(lines, hit, cutters) };
+  const cutters: [number, number][][] = [];
+  for (const v of views) {
+    if (!(v.box && v.box[0] <= x1 && v.box[2] >= x0 && v.box[1] <= y1 && v.box[3] >= y0)) continue;
+    for (const l of v.layers) for (const path of l.paths) cutters.push(path);
+    for (const path of v.unassigned ?? []) cutters.push(path);
+  }
+  return { p: parts[k], view: views[k], ...trim(lines, hit, cutters) };
+}
+
+/** Why baking a part's on-screen lines (Trim, Rotate by any angle) would lose something, or null when it is
+ *  safe: a change still on its way to the server (the lines are old: a resize or text edit would be undone),
+ *  or grey lines whose colour is not chosen yet (they are not laser lines, so they would be dropped). */
+function cannotBake(views: PartView[], what: string): string | null {
+  if (staleView()) return `Wait a moment for the laser lines to catch up, then ${what} again.`;
+  if (views.some((v) => v.unassigned?.length)) return `Choose what each colour does first (under Layers), then ${what}.`;
+  return null;
 }
 
 /** A loop, not Math.min(...): spreading a big file's points overflows the stack. */
@@ -889,18 +1006,18 @@ function trimClick(mx: number, my: number, tol: number): void {
     if (!getPhrase()) warn('Trim works on the laser lines. Enter the class phrase first.');
     return;
   }
-  const { p, keep } = plan;
-  const i = resultIds.indexOf(p.id);
-  if (i >= 0 && result?.unassigned?.some((u) => u.part === i)) return warn('Choose what each colour does first (under Layers), then trim.');
+  const { p, keep, view } = plan;
+  const why = cannotBake([view], 'trim');
+  if (why) return warn(why);
   if (!keep.length) { // the last line went: so does the part
     parts = parts.filter((q) => q !== p);
     dropLocal(p.id);
     if (selection().includes(p.id)) select(null);
-    changed();
+    changed({ exact: true });
     return;
   }
   bakeLines(p, keep, '(trimmed)');
-  changed();
+  changed({ exact: true });
   cacheBaked(p);
 }
 
@@ -918,7 +1035,7 @@ function bakeLines(p: DesignPart, lines: TrimLine[], tag: string): void {
   for (const f of ['scaleY', 'flipX', 'flipY', 'weld', 'outline', 'closeGaps'] as const) delete p[f];
   dropLocal(p.id);
   const kinds = RUN_ORDER.filter((kind) => lines.some((l) => l.kind === kind));
-  knownColors.set(data, kinds.map((kind) => ({ key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind })));
+  setKnownColors(data, kinds.map((kind) => ({ key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind })));
   const layers = kinds.map((kind) => ({ kind, paths: lines.filter((l) => l.kind === kind).map((l) => l.pts) }));
   const i = resultIds.indexOf(p.id);
   if (result && i >= 0) { // show it at once; the server's answer replaces it
@@ -933,7 +1050,7 @@ const baked = new Map<number, { box: Box; layers: PartView['layers'] }>();
 function cacheBaked(...ps: DesignPart[]): void {
   for (const p of ps) {
     const b = baked.get(p.id);
-    if (b) viewCache.set(partSig(p, sigCtx()), { id: p.id, ...b });
+    if (b) cacheView(partSig(p, sigCtx()), { id: p.id, ...b });
     baked.delete(p.id);
   }
 }
@@ -969,17 +1086,16 @@ function rotateBy(deg: number): void {
     return;
   }
   if (ps.some((p) => p.source.kind === 'file' && p.source.fileType === 'pbm')) return warn('Photos can only turn in quarter turns (90°, 180°, 270°).');
+  const why = cannotBake(views, 'rotate'); // first: a file of only grey lines has no laser lines yet either
+  if (why) return warn(why);
   if (ps.some((p, k) => !views[k].layers.length)) {
     return warn(getPhrase() ? 'Wait a moment for the laser lines, then rotate again.' : 'Turning by any angle works on the laser lines. Enter the class phrase first, or use 90°, 180° or 270°.');
-  }
-  if (ps.some((p) => { const i = resultIds.indexOf(p.id); return i >= 0 && result?.unassigned?.some((u) => u.part === i); })) {
-    return warn('Choose what each colour does first (under Layers), then rotate.');
   }
   for (const [k, p] of ps.entries()) {
     const lines = views[k].layers.flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts: pts.map(spin) })));
     bakeLines(p, lines, '(rotated)');
   }
-  changed();
+  changed({ exact: true });
   cacheBaked(...ps);
   warn(`Turned ${turn}°. Turned by an odd angle, text and shapes become drawings (Ctrl+Z goes back).`, '✓');
 }
@@ -1535,17 +1651,18 @@ function recolourNow(ids: number[], from: OpKind | null | 'all', to: ColorChoice
   const moved = new Map<number, [number, number][][]>(); // part index -> its lines that change colour
   for (const id of ids) { const i = ix.at.get(id); if (i !== undefined) moved.set(i, []); }
   if (!moved.size) return;
+  // loops, not push(...paths): a big file's paths overflow the stack when spread
   result.preview = result.preview.filter((l) => {
     const m = moved.get(l.part);
     if (!m || (from !== 'all' && l.kind !== from)) return true;
-    m.push(...l.paths);
+    for (const path of l.paths) m.push(path);
     return false;
   });
   if (from === null || from === 'all') {
     result.unassigned = (result.unassigned ?? []).filter((u) => {
       const m = moved.get(u.part);
       if (!m) return true;
-      m.push(...u.paths);
+      for (const path of u.paths) m.push(path);
       return false;
     });
   }
@@ -1832,10 +1949,20 @@ function renderColors(): void {
 
 let timer = 0;
 let seq = 0;
+let edits = 0;      // changes the lines on screen cannot show until the server answers (a resize, a text edit)
+let drawnEdits = 0; // `edits` when the design behind the lines on screen was read
+
+/** The lines on screen are older than the design: baking them (Trim, Rotate by any angle) would undo a change. */
+function staleView(): boolean {
+  // with no result, parts are drawn from viewCache (by their exact state) or by the browser: never stale
+  return !!result && edits !== drawnEdits;
+}
 
 /** Something about the design changed: remember it for Undo, save it, redraw, and re-process soon.
- *  `merge` folds quick repeats (typing, nudging) into one Undo step. */
-function changed(opts: { merge?: string; history?: boolean } = {}): void {
+ *  `merge` folds quick repeats (typing, nudging) into one Undo step. `exact`: the lines on screen were
+ *  already changed to match (a move, a trim), so they are not out of date. */
+function changed(opts: { merge?: string; history?: boolean; exact?: boolean } = {}): void {
+  if (!opts.exact) edits++;
   if (opts.history !== false) record(opts.merge);
   save();
   schedule();
@@ -1878,11 +2005,14 @@ function applySnap(s: Snap): void {
   colorMap = { ...s.colorMap };
   lastSnap = snap();
   lastMerge = '';
-  nextId = Math.max(nextId, ...parts.map((q) => q.id + 1));
+  nextId = Math.max(nextId, idAfter(parts));
   if (!find(selected)) selected = null;
-  group = group.filter((id) => find(id));
+  const kept = new Set(parts.map((q) => q.id));
+  group = group.filter((id) => kept.has(id));
   if (group.length < 2) group = [];
   ws.setGroup(group);
+  keepLocal(kept); // sketches of parts the Undo took away (they come back if Redo needs them)
+  edits++; // a request already on its way is for the design before the Undo
   result = null; // the old preview no longer matches; the browser draws parts until the server answers
   resultIds = [];
   ws.clearLive();
@@ -1931,7 +2061,7 @@ function copiesOf(ps: DesignPart[], dx: number, dy: number): DesignPart[] {
 function putCopies(made: DesignPart[]): void {
   if (!made.length) return;
   if (parts.length + made.length > MAX_PARTS) return warn(`That would be more than ${MAX_PARTS} parts.`);
-  parts.push(...made);
+  for (const q of made) parts.push(q);
   changed();
   if (made.length === 1) select(made[0].id);
   else setGroup(made.map((q) => q.id));
@@ -1940,7 +2070,8 @@ function putCopies(made: DesignPart[]): void {
 function copySelected(): void {
   const ids = selection();
   if (!ids.length) return;
-  clipboard = cloneParts(parts.filter((p) => ids.includes(p.id)));
+  const has = new Set(ids);
+  clipboard = cloneParts(parts.filter((p) => has.has(p.id)));
   pasteCount = 0;
   warn(`Copied ${ids.length} ${ids.length === 1 ? 'part' : 'parts'}. Ctrl+V pastes.`, '✓');
 }
@@ -1954,7 +2085,8 @@ function paste(): void {
 function duplicateSelected(): void {
   const ids = selection();
   if (!ids.length) return;
-  putCopies(copiesOf(parts.filter((p) => ids.includes(p.id)), -10, 10));
+  const has = new Set(ids);
+  putCopies(copiesOf(parts.filter((p) => has.has(p.id)), -10, 10));
 }
 
 // ---------- mirror ----------
@@ -1979,7 +2111,7 @@ function mirrorSelected(axis: 'x' | 'y'): void {
     p.yMm = round(p.yMm + dy);
     flipResult(id, axis, dx, dy);
   }
-  changed();
+  changed({ exact: true });
 }
 
 /** Mirror what is already on screen too, so the flip shows before the server answers. */
@@ -2034,7 +2166,7 @@ function alignSelected(how: AlignHow): void {
     shiftResult(id, dx, dy);
   }
   jobBoxNow();
-  changed();
+  changed({ exact: true });
 }
 
 function openAlignMenu(at: { x: number; y: number }): void {
@@ -2488,6 +2620,7 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
 }
 
 async function run(): Promise<void> {
+  const at = edits;
   const { req, files, ids } = buildRequest();
   if (!materialId || !req.parts.length) {
     result = null;
@@ -2515,6 +2648,7 @@ async function run(): Promise<void> {
     const hadOpen = !!result?.openEngraveParts?.length;
     result = res;
     resultIds = ids;
+    drawnEdits = at;
     notes = [];
     remember(res, ids, sigs);
     // say it once, where the student is looking; the button itself is in the Laser panel
@@ -2525,6 +2659,7 @@ async function run(): Promise<void> {
     if (mine !== seq) return;
     result = null;
     resultIds = [];
+    drawnEdits = at;
     notes = [(e as Error).message];
     if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
       setPhrase(''); // wrong or expired: the phrase card at the top of the side panel asks again
@@ -2545,7 +2680,7 @@ $('phraseBtn').onclick = askPhrase;
 $('phraseChange').onclick = askPhrase;
 
 const joinBox = $<HTMLInputElement>('joinLines');
-joinBox.onchange = () => { joinLines = joinBox.checked; save(); schedule(); render(); };
+joinBox.onchange = () => { joinLines = joinBox.checked; edits++; save(); schedule(); render(); };
 
 // ---------- side panel: drag its edge to resize, fold any box away ----------
 
@@ -2814,16 +2949,41 @@ $<HTMLInputElement>('panelName').oninput = () => {
   updateButtons();
 };
 
-/** First typed text, else the first file's name, else DESIGN. */
+/** First typed text, else the first file's name, else JOB and three characters from this Chromebook's id,
+ *  so two students with nothing typed do not both get the same name. */
 function suggestedPanelName(): string {
   for (const p of parts) if (p.source.kind === 'text' && cleanPanelName(p.source.text.value)) return cleanPanelName(p.source.text.value);
   for (const p of parts) if (p.source.kind === 'file' && cleanPanelName(p.source.name.replace(/\.[^.]*$/, ''))) return cleanPanelName(p.source.name.replace(/\.[^.]*$/, ''));
-  return 'DESIGN';
+  return cleanPanelName('JOB' + deviceId().replace(/[^0-9a-z]/gi, '').slice(-3)) || 'JOB';
+}
+
+/** The name is already on the laser: Replace, Keep both (under `free`), or Cancel. Nothing is changed until
+ *  the student picks; closing the box any other way is Cancel. */
+function askNameTaken(name: string, free: string | null): Promise<'replace' | 'keep' | 'cancel'> {
+  $('nameDlgInfo').textContent = `A file called ${name} is already on the laser. It may be another student's job. `
+    + (free ? `Keep both saves yours as ${free}.` : 'Type a different name to keep both.');
+  const keep = $<HTMLButtonElement>('nameKeep');
+  keep.disabled = !free;
+  keep.textContent = free ? `Keep both (save as ${free})` : 'Keep both';
+  $('nameDlg').hidden = false;
+  (free ? keep : $('nameCancel')).focus();
+  return new Promise((resolve) => {
+    const done = (v: 'replace' | 'keep' | 'cancel') => {
+      $('nameDlg').hidden = true;
+      for (const id of ['nameCancel', 'nameReplace', 'nameKeep']) $(id).onclick = null;
+      $('nameDlg').onkeydown = null;
+      resolve(v);
+    };
+    $('nameCancel').onclick = () => done('cancel');
+    $('nameReplace').onclick = () => done('replace');
+    keep.onclick = () => done('keep');
+    $('nameDlg').onkeydown = (e) => { if (e.key === 'Escape') done('cancel'); };
+  });
 }
 
 async function sendBytes(b64: string): Promise<boolean> {
   if (!link) return false;
-  const panelName = machine.sendToPanel ? cleanPanelName($<HTMLInputElement>('panelName').value) : '';
+  let panelName = machine.sendToPanel ? cleanPanelName($<HTMLInputElement>('panelName').value) : '';
   const prog = $<HTMLProgressElement>('progress');
   prog.hidden = false;
   prog.value = 0;
@@ -2831,7 +2991,20 @@ async function sendBytes(b64: string): Promise<boolean> {
   try {
     const onProgress = (s: number, t: number) => { prog.value = s / t; };
     if (panelName) {
-      const replaced = await link.sendToPanel(fromBase64(b64), panelName, onProgress);
+      // Ask before anything on the laser is replaced: the same name may be another student's waiting job.
+      let replace = false;
+      const names = await link.listNames();
+      if (names.includes(panelName)) {
+        const free = freePanelName(panelName, names);
+        const choice = await askNameTaken(panelName, free);
+        if (choice === 'cancel') {
+          notes = ['Not sent. Nothing on the laser was changed.'];
+          return false;
+        }
+        if (choice === 'keep' && free) panelName = free;
+        else replace = choice === 'replace';
+      }
+      const replaced = await link.sendToPanel(fromBase64(b64), panelName, { replace, onProgress });
       notes = [`Saved on the laser as ${panelName}${replaced ? ', replacing the old file with that name' : ''}. On the laser, pick it, press Frame to check it fits, then press Start. Watch the laser the whole time.`];
     } else {
       await link.send(fromBase64(b64), onProgress);
@@ -2899,11 +3072,13 @@ $('send').onclick = async () => {
 };
 
 async function stop(): Promise<void> {
+  const failed = 'Could not send STOP. Press the red E-stop button on the laser!';
   try {
-    await link?.stop();
-    notes = ['Stop sent.'];
+    // false: STOP is stuck behind a write the USB port is holding (hardware flow control), so it may never go
+    if ((await link?.stop()) === false) warn(failed, '⛔');
+    else notes = ['Stop sent.'];
   } catch {
-    notes = ['Could not send STOP. Press the red E-stop button on the laser!'];
+    warn(failed, '⛔');
   }
   render();
 }
@@ -2968,7 +3143,7 @@ document.addEventListener('keydown', (e) => {
       shiftResult(id, d[0], d[1]);
     }
     jobBoxNow();
-    changed({ merge: `nudge${ids.join(',')}` });
+    changed({ merge: `nudge${ids.join(',')}`, exact: true });
   }
 });
 
@@ -2982,7 +3157,8 @@ function warn(text: string, mark = '⚠'): void {
   t.textContent = `${mark} ${text}`;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { t.hidden = true; }, 6000);
+  // the E-stop warning stays until clicked: a Send that fails right after must not hide it
+  if (mark !== '⛔') toastTimer = window.setTimeout(() => { t.hidden = true; }, 6000);
 }
 $('toast').onclick = () => { $('toast').hidden = true; };
 
@@ -3018,13 +3194,20 @@ function save(): void {
   saveTimer = window.setTimeout(saveNow, 500);
 }
 
+let saveFailSaid = false; // say it once, not on every change
 function saveNow(): void {
   clearTimeout(saveTimer);
   saveTimer = 0;
   try {
-    localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, materialId, color, locked, unit, material, joinLines }));
+    localStorage.setItem(STORE, JSON.stringify({ parts, colorMap, powerChoice, materialId, color, locked, unit, material, joinLines }));
+    saveFailSaid = false;
   } catch {
-    /* too big for storage: the design still works, it just won't survive a reload */
+    // too big for storage (or storage is blocked): the design still works, it just won't survive a reload.
+    // The older copy already stored is left alone: a failed save must not lose it.
+    if (!saveFailSaid && !document.hidden) {
+      saveFailSaid = true;
+      warn('This design is too big to keep in this browser, so a reload may bring back an older copy. Press Save to keep it as a file.');
+    }
   }
 }
 window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
@@ -3033,17 +3216,19 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && sav
 function restore(): void {
   try {
     const s = JSON.parse(localStorage.getItem(STORE) ?? 'null');
-    if (!s || !Array.isArray(s.parts)) return;
-    parts = s.parts;
-    colorMap = s.colorMap ?? {};
-    materialId = s.materialId ?? '';
+    if (!s || typeof s !== 'object' || !Array.isArray(s.parts)) return;
+    // checked like a .uml file: one bad part would break every redraw
+    parts = cleanParts(s.parts);
+    colorMap = plainObj(s.colorMap);
+    powerChoice = cleanPower(s.powerChoice);
+    materialId = typeof s.materialId === 'string' ? s.materialId : '';
     const mt = s.material;
     if (mt && Number(mt.w) > 0 && Number(mt.h) > 0) material = { w: Number(mt.w), h: Number(mt.h) };
-    if (s.color in OP_LABELS) color = s.color;
+    if (RUN_ORDER.includes(s.color)) color = s.color;
     if (s.locked === false) locked = false;
     if (s.joinLines === false) joinLines = false;
     if (s.unit === 'cm' || s.unit === 'in') unit = s.unit;
-    nextId = Math.max(0, ...parts.map((p) => p.id)) + 1;
+    nextId = idAfter(parts); // group ids too, or a new group could join an old one
   } catch {
     parts = [];
   }

@@ -14,8 +14,9 @@ const { parseReplies } = await import('../src/ruida/panel.ts');
 const M = 0x88;
 const hex = (u8) => Buffer.from(u8).toString('hex');
 
-/** A fake controller. `files` is its list; `silent` never answers. Records every command written. */
-function fakeLaser({ files = [], silent = false } = {}) {
+/** A fake controller. `files` is its list; `silent` never answers. Records every command written.
+ *  `onWrite(hex, writes)` runs before it answers (to press STOP at an exact moment). */
+function fakeLaser({ files = [], silent = false, onWrite } = {}) {
   const writes = [];
   let push;
   const readable = new ReadableStream({ start(c) { push = (b) => c.enqueue(swizzle(b, M)); } });
@@ -23,6 +24,7 @@ function fakeLaser({ files = [], silent = false } = {}) {
     write(chunk) {
       const plain = unswizzle(chunk, M);
       writes.push(hex(plain));
+      onWrite?.(hex(plain), writes);
       if (silent) return;
       if (hex(plain) === 'da000405') push(Uint8Array.of(0xda, 0x01, 0x04, 0x05, 0, 0, 0, 0, files.length));
       else if (plain[0] === 0xe8 && plain[1] === 0x01) {
@@ -53,11 +55,83 @@ test('new name: reads the list, never deletes, sends name then job', async () =>
   await l.disconnect();
 });
 
-test('same name: deletes exactly that one slot', async () => {
+test('same name, Replace pressed: deletes exactly that one slot', async () => {
   const writes = fakeLaser({ files: ['AB C-1', 'TEST1'] });
   const l = await link();
-  assert.equal(await l.sendToPanel(JOB, 'TEST1'), true);
+  assert.equal(await l.sendToPanel(JOB, 'TEST1', { replace: true }), true);
   assert.deepEqual(writes, ['da000405', 'e8010001', 'e8010002', 'e8010002', 'e80000020002', 'e802e701544553543100d812d7']);
+  await l.disconnect();
+});
+
+test('same name without Replace (another student\'s job): nothing is deleted or sent', async () => {
+  const writes = fakeLaser({ files: ['AB C-1', 'TEST1'] });
+  const l = await link();
+  await assert.rejects(l.sendToPanel(JOB, 'TEST1'), /already on the laser/);
+  assert.deepEqual(writes, ['da000405', 'e8010001', 'e8010002']);
+  assert.ok(!writes.some((w) => w.startsWith('e800')), 'no delete');
+  assert.equal(l.sending, false);
+  await l.disconnect();
+});
+
+test('listNames only reads the list', async () => {
+  const writes = fakeLaser({ files: ['AB C-1', 'TEST1'] });
+  const l = await link();
+  assert.deepEqual(await l.listNames(), ['AB C-1', 'TEST1']);
+  assert.deepEqual(writes, ['da000405', 'e8010001', 'e8010002']);
+  await l.disconnect();
+});
+
+test('STOP while the slot is read again: the old file is never deleted', async () => {
+  let l;
+  const writes = fakeLaser({
+    files: ['AB C-1', 'TEST1'],
+    // the re-read of slot 2 (its second read): press STOP before the laser answers
+    onWrite: (h, all) => { if (h === 'e8010002' && all.filter((w) => w === h).length === 2) void l.stop(); },
+  });
+  l = await link();
+  await assert.rejects(l.sendToPanel(JOB, 'TEST1', { replace: true }), /Stopped/);
+  assert.ok(!writes.some((w) => w.startsWith('e800')), `no delete in ${writes}`);
+  assert.ok(!writes.some((w) => w.startsWith('e802')), 'no job');
+  assert.ok(writes.includes('d801'), 'STOP went out');
+  await l.disconnect();
+});
+
+test('STOP while the list is read: nothing is deleted or sent', async () => {
+  let l;
+  const writes = fakeLaser({
+    files: ['TEST1', 'B', 'C'],
+    onWrite: (h) => { if (h === 'e8010001') void l.stop(); },
+  });
+  l = await link();
+  await assert.rejects(l.sendToPanel(JOB, 'TEST1', { replace: true }), /Stopped/);
+  assert.ok(!writes.some((w) => w.startsWith('e800') || w.startsWith('e802')), `${writes}`);
+  await l.disconnect();
+});
+
+test('STOP stuck behind a write the port is holding says so within its time limit', async () => {
+  const port = {
+    readable: new ReadableStream({ start() {} }),
+    writable: new WritableStream({ write: () => new Promise(() => {}) }), // hardware flow control never lets go
+    open: async () => {},
+    close: async () => {},
+    getInfo: () => ({ usbVendorId: 0x0403 }),
+  };
+  Object.defineProperty(globalThis, 'navigator', { value: { serial: { getPorts: async () => [port], addEventListener() {}, removeEventListener() {} } }, configurable: true });
+  const l = new LaserLink({ baud: 115200, magic: M });
+  await l.connect();
+  void l.send(new Uint8Array(4096)).catch(() => {});
+  await new Promise((r) => setTimeout(r, 20));
+  const t = Date.now();
+  assert.equal(await l.stop(100), false, 'not sent: press the E-stop');
+  assert.ok(Date.now() - t < 2000);
+  await l.hardClose();
+});
+
+test('STOP on a healthy port reports it was sent', async () => {
+  const writes = fakeLaser();
+  const l = await link();
+  assert.equal(await l.stop(), true);
+  assert.deepEqual(writes, ['d801']);
   await l.disconnect();
 });
 

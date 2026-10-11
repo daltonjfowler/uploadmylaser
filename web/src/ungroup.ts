@@ -112,7 +112,7 @@ export function splitPieces(lines: Line[]): Piece[] {
     if (isClosed(l.pts)) shapes.push({ lines: [l], box: boxOf(l.pts), poly: l.pts, area: 0 });
     else open.push(l);
   }
-  shapes.push(...joinOpen(open));
+  for (const s of joinOpen(open)) shapes.push(s); // not push(...): a floor plan has too many to spread
   for (const s of shapes) s.area = (s.box[2] - s.box[0]) * (s.box[3] - s.box[1]);
   shapes.sort((a, b) => b.area - a.area);
 
