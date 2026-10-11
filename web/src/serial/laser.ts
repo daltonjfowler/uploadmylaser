@@ -70,7 +70,7 @@ export class LaserLink {
 
   /** Chrome's picker with every USB port. Throws NotFoundError when cancelled. Opens nothing. */
   static pick(): Promise<SerialPort> {
-    if (!LaserLink.supported()) return Promise.reject(new Error('This browser cannot talk to USB devices. Use Chrome on a Chromebook.'));
+    if (!LaserLink.supported()) return Promise.reject(new Error('This browser cannot talk to USB devices. Use Chrome or Edge.'));
     return navigator.serial.requestPort({});
   }
 
@@ -91,7 +91,7 @@ export class LaserLink {
    * the caller remembers a port only once it has opened.
    */
   async connect(pick: 'auto' | 'filtered' | 'all' = 'auto', remembered?: PortId | null, chosen?: SerialPort): Promise<void> {
-    if (!LaserLink.supported()) throw new Error('This browser cannot talk to USB devices. Use Chrome on a Chromebook.');
+    if (!LaserLink.supported()) throw new Error('This browser cannot talk to USB devices. Use Chrome or Edge.');
     const granted = await navigator.serial.getPorts();
     // The picker lists every port: the laser's USB chip is not verified (docs/HARDWARE.md), and a vendor
     // filter that guessed wrong showed an empty list (Dalton 2026-10-06).

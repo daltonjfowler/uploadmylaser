@@ -2808,8 +2808,11 @@ async function connectLaser(pick: 'auto' | 'filtered' | 'all', chosen?: SerialPo
   } catch (e) {
     setConnected(false);
     if ((e as Error).name === 'NotFoundError') {
-      // Picker cancelled, maybe because the laser wasn't listed
-      warn('Laser not in the list? Check the USB cable is in and the laser is switched on, then press Connect laser again. Still missing: Help has steps for your teacher.');
+      // Picker cancelled, maybe because the laser wasn't listed. On Windows that usually means the FTDI
+      // driver is missing or still downloading on a laptop that never had the laser plugged in (2026-10-10).
+      warn(/Windows/.test(navigator.userAgent)
+        ? 'Laser not in the list? Check the laser is on and the USB cable is in. On a laptop that is new to the laser, Windows needs about a minute to set it up: wait, unplug the cable, plug it back in, then press Connect laser again. Still missing: this laptop needs the laser\'s USB driver. Ask your teacher (Help has the steps).'
+        : 'Laser not in the list? Check the USB cable is in and the laser is switched on, then press Connect laser again. Still missing: Help has steps for your teacher.');
       pickerCancelled = true;
     } else warn(`${(e as Error).message} Or press Choose USB port… to pick the laser again.`);
     render();
@@ -2868,7 +2871,7 @@ barsGrip.onkeydown = (e) => {
 // Reset USB: close everything and reopen the same remembered laser port. No picker, nothing forgotten,
 // the remembered port is not changed (Dalton 2026-10-05: failsafes must never lose the right connection).
 $('resetUsb').onclick = async () => {
-  if (!LaserLink.supported()) return warn('This browser cannot talk to USB devices. Use Chrome on a Chromebook.');
+  if (!LaserLink.supported()) return warn('This browser cannot talk to USB devices. Use Chrome or Edge.');
   if (link?.sending && !confirm('A Send is still going. Reset stops it, and the laser may keep half a file. Send again before you press Start on the laser. Reset now?')) return;
   const btn = $<HTMLButtonElement>('resetUsb');
   btn.disabled = true;
