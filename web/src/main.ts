@@ -21,6 +21,7 @@ import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
 import { nearestShown, trim, type TrimHit, type TrimLine } from './trim';
 import { zip } from './zip';
+import { nest, spinQ, type NestItem } from './nest';
 import { boxPanels, outsideSize } from './boxmaker';
 import { adjust, runCount, toDots, toPbm } from './photo';
 import { bounds, pointCount, toDxf, trace, type Pt as TracePt } from './trace';
@@ -1765,7 +1766,9 @@ function menuItems(name: string): MenuItem[] {
     case 'arrange': return [
       act('Rotate a quarter turn', 'rotate'), ['Mirror left-right', () => mirrorSelected('x'), !n], ['Mirror up-down', () => mirrorSelected('y'), !n], null,
       ...(Object.keys(ALIGN_LABELS) as AlignHow[]).map((how): MenuItem => [ALIGN_LABELS[how], () => alignSelected(how), n < 2]), null,
-      act('Group', 'group'), act('Ungroup', 'ungroup'),
+      act('Group', 'group'), act('Ungroup', 'ungroup'), null,
+      ['Auto arrange: pack tight to save material', () => autoArrange(true), !parts.length],
+      ['Auto arrange: pack, but keep every part\'s turn', () => autoArrange(false), !parts.length],
     ];
     case 'make': return [
       ['Text', () => $('toolText').click()], ['Box', () => $('toolBox').click()], ['Circle', () => $('toolCircle').click()],
@@ -2168,6 +2171,111 @@ function alignSelected(how: AlignHow): void {
   jobBoxNow();
   changed({ exact: true });
 }
+
+// ---------- auto arrange: pack the pieces tight to save material ----------
+
+const NEST_GAP_MM = 3;
+
+/** Parts that move as one piece: a group, and parts whose boxes touch (text on its sign, a part in a hole). */
+function nestPieces(ids: number[], boxes: Map<number, Box>): number[][] {
+  const up = new Map(ids.map((id) => [id, id]));
+  const root = (id: number): number => { let r = id; while (up.get(r) !== r) r = up.get(r)!; up.set(id, r); return r; };
+  const join = (a: number, b: number) => { const [ra, rb] = [root(a), root(b)]; if (ra !== rb) up.set(ra, rb); };
+  const byGroup = new Map<number, number>();
+  for (const id of ids) {
+    const g = find(id)?.groupId;
+    if (g === undefined) continue;
+    const first = byGroup.get(g);
+    if (first === undefined) byGroup.set(g, id);
+    else join(first, id);
+  }
+  // sweep across x, so 5000 pieces are not compared all with all
+  const sorted = [...ids].sort((a, b) => boxes.get(a)![0] - boxes.get(b)![0]);
+  const open: number[] = [];
+  for (const id of sorted) {
+    const b = boxes.get(id)!;
+    for (let k = open.length - 1; k >= 0; k--) {
+      const o = boxes.get(open[k])!;
+      if (o[2] < b[0]) { open.splice(k, 1); continue; }
+      if (o[1] <= b[3] && b[1] <= o[3]) join(id, open[k]);
+    }
+    open.push(id);
+  }
+  const out = new Map<number, number[]>();
+  for (const id of ids) {
+    const r = root(id);
+    if (!out.has(r)) out.set(r, []);
+    out.get(r)!.push(id);
+  }
+  return [...out.values()];
+}
+
+/** Pack the selected parts (two or more), or else every part, into My material or the whole bed, starting
+ *  at the home corner. turns: quarter-turn pieces when that packs tighter. All fit, or nothing moves. */
+function autoArrange(turns: boolean): void {
+  const ids = selection().length > 1 ? withGroups(selection()) : parts.map((p) => p.id);
+  if (!ids.length) return warn('Add some parts first, then Auto arrange packs them together.');
+  const views = new Map(ids.map((id) => [id, viewOf(find(id)!)]));
+  if ([...views.values()].some((v) => !v.box)) return warn('Wait a moment for the laser lines, then arrange again.');
+  const boxes = new Map([...views].map(([id, v]) => [id, v.box!]));
+  const toItem = (members: number[]): NestItem => {
+    const paths: [number, number][][] = [];
+    const rects: Box[] = [];
+    for (const id of members) {
+      const v = views.get(id) ?? viewOf(find(id)!);
+      const own = [...v.layers.flatMap((l) => l.paths), ...(v.unassigned ?? [])];
+      if (own.length) paths.push(...own);
+      else if (v.box) rects.push(v.box); // no lines yet (a sketch): its whole box
+    }
+    return { box: unionBox(members.map((id) => views.get(id)?.box ?? boxOf(id)))!, paths, rects };
+  };
+  const pieces = nestPieces(ids, boxes);
+  const items = pieces.map(toItem);
+  // parts left out of the selection stay where they are, and the packing keeps clear of them
+  const moving = new Set(ids);
+  const fixed = parts.filter((p) => !moving.has(p.id) && boxOf(p.id)).map((p) => {
+    const v = viewOf(p);
+    const own = [...v.layers.flatMap((l) => l.paths), ...(v.unassigned ?? [])];
+    return { box: v.box!, paths: own, rects: own.length ? [] : [v.box!] };
+  });
+  const W = machine.bedWidthMm, H = machine.bedHeightMm;
+  const mw = material ? Math.min(material.w, W) : W, mh = material ? Math.min(material.h, H) : H;
+  const x0 = zeroRight() ? W - mw : 0, y0 = zeroBottom() ? H - mh : 0;
+  const res = nest(items, [x0, y0, x0 + mw, y0 + mh], { gapMm: NEST_GAP_MM, turns, fromRight: zeroRight(), fromBottom: zeroBottom() }, fixed);
+  if (!res.ok) {
+    const where = material ? 'My material' : 'the bed';
+    return warn(`Not everything fits on ${where}: ${res.left} piece${res.left === 1 ? '' : 's'} left over. Nothing was moved.${material ? ' Make My material bigger, or clear it to use the whole bed.' : ''}`);
+  }
+  let turned = false;
+  pieces.forEach((members, k) => {
+    const m = res.moves[k];
+    const [cx, cy] = [(items[k].box[0] + items[k].box[2]) / 2, (items[k].box[1] + items[k].box[3]) / 2];
+    for (const id of members) {
+      const p = find(id)!;
+      if (m.turns === 0) {
+        p.xMm = round(p.xMm + m.dx);
+        p.yMm = round(p.yMm + m.dy);
+        shiftResult(id, m.dx, m.dy);
+        continue;
+      }
+      // a quarter turn of the whole piece about its centre, as rotateBy turns a group
+      turned = true;
+      const b = boxes.get(id)!;
+      const [mx, my] = spinQ(m.turns, cx, cy, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
+      const [w, h] = m.turns % 2 ? [b[3] - b[1], b[2] - b[0]] : [b[2] - b[0], b[3] - b[1]];
+      p.rotateDeg = ((p.rotateDeg + 360 - 90 * m.turns) % 360) as Placement['rotateDeg'];
+      p.xMm = round(mx + m.dx + w / 2);
+      p.yMm = round(my + m.dy - h / 2);
+    }
+  });
+  if (turned) changed();
+  else {
+    jobBoxNow();
+    changed({ exact: true });
+  }
+  warn(`Packed ${pieces.length} piece${pieces.length === 1 ? '' : 's'} together, ${NEST_GAP_MM} mm apart. Touching parts stayed together. Ctrl+Z puts them back.`, '✓');
+}
+$('autoArrange').onclick = () => autoArrange(true);
 
 function openAlignMenu(at: { x: number; y: number }): void {
   showMenu(at, (Object.keys(ALIGN_LABELS) as AlignHow[]).map((how) => [ALIGN_LABELS[how], () => alignSelected(how)]));

@@ -57,6 +57,11 @@ label.block { display: flex; flex-direction: column; align-items: stretch; gap: 
 
 /* ---------- student app: a laser-software-like window ---------- */
 body.app { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
+/* Each part keeps its own row. School Chrome extensions put their own element at the top of <body>; without
+   these it took row 1, the bars got a 0 px row and covered the class phrase card (2026-10-21). */
+body.app > .topbars { grid-row: 1; }
+body.app > .workarea { grid-row: 2; }
+body.app > .hint { grid-row: 3; }
 .topbars { position: sticky; top: 0; z-index: 6; min-width: 0; zoom: var(--bars-zoom, 1); }
 .barsgrip { height: 7px; cursor: row-resize; touch-action: none; background: var(--chrome); border-bottom: 1px solid var(--line); }
 .barsgrip::after { content: ""; display: block; width: 44px; height: 3px; margin: 2px auto 0; border-radius: 2px; background: var(--line); }
@@ -319,6 +324,10 @@ kbd { font: 600 .8rem ui-monospace, Consolas, monospace; padding: 1px 5px; borde
   .titlebar button, .titlebar .toplink, .titlebar .pill { padding: 4px 8px; font-size: .85rem; }
   .brand { font-size: 1rem; }
   .brand img { width: 40px; height: 40px; }
+}
+/* The footer stays one line at every width (2026-10-21): a long hint used to wrap it to three lines on hover,
+   which shrank the bed and cut its bottom off. Phones (below) still wrap. */
+@media (min-width: 641px) {
   .hint { flex-wrap: nowrap; overflow: hidden; }
   .hint #hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hint .credit { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

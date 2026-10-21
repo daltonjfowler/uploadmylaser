@@ -92,6 +92,9 @@ export class Workspace {
   /** px per mm, and the screen position (css px) of bed 0,0 */
   private view = { s: 1, ox: RULER + 10, oy: RULER + 10 };
   private fitted = false;
+  /** The view still shows the whole bed as fitted: re-fit when the window or panels change size, until
+   *  the student zooms or pans. A scale kept from an old size left the bed huge and cut off, or tiny. */
+  private autoFit = true;
   private live: Live | null = null;
   private gesture:
     | { kind: 'move'; ids: number[]; box: Box; startX: number; startY: number }
@@ -118,7 +121,7 @@ export class Workspace {
   constructor(private canvas: HTMLCanvasElement, private ev: WorkspaceEvents) {
     this.g = canvas.getContext('2d')!;
     new ResizeObserver(() => {
-      if (!this.fitted) this.fit();
+      if (!this.fitted || this.autoFit) this.fit();
       this.clampView();
       this.draw();
     }).observe(canvas);
@@ -277,9 +280,11 @@ export class Workspace {
   fit(): void {
     this.zoomTo([0, 0, this.bed.w, this.bed.h]);
     this.fitted = this.canvas.clientWidth > 0;
+    this.autoFit = true;
   }
 
   zoomTo(b: Box): void {
+    this.autoFit = false;
     const w = this.canvas.clientWidth - RULER - 20;
     const h = this.canvas.clientHeight - RULER - 20;
     if (w <= 0 || h <= 0) return;
@@ -295,6 +300,7 @@ export class Workspace {
   }
 
   zoomBy(f: number, cx = this.canvas.clientWidth / 2, cy = this.canvas.clientHeight / 2): void {
+    this.autoFit = false;
     const s = Math.min(Math.max(this.view.s * f, this.fitScale() * 0.6), 60);
     const k = s / this.view.s;
     this.view = { s, ox: cx - (cx - this.view.ox) * k, oy: cy - (cy - this.view.oy) * k };
@@ -528,6 +534,7 @@ export class Workspace {
       const s = Math.min(Math.max((gs.s0 * Math.hypot(a.x - b.x, a.y - b.y)) / gs.d0, this.fitScale() * 0.6), 60);
       // the bed point that started under the fingers' midpoint stays under it
       this.view = { s, ox: (a.x + b.x) / 2 - gs.mx * s, oy: (a.y + b.y) / 2 - gs.my * s };
+      this.autoFit = false;
       this.clampView();
     } else if (gs.kind === 'box') {
       gs.x1 = p.mx;
@@ -535,6 +542,7 @@ export class Workspace {
     } else if (gs.kind === 'pan') {
       this.view.ox = gs.ox + p.x - gs.startX;
       this.view.oy = gs.oy + p.y - gs.startY;
+      this.autoFit = false;
       this.clampView();
     } else if (gs.kind === 'move') {
       const dx = p.mx - gs.startX;
