@@ -22,7 +22,9 @@ The first deploy pushes the Docker image, which takes a few minutes. Later deplo
 ## Security (see src/headers.ts and src/worker.ts)
 - Every request goes through the Worker (`run_worker_first: true`): http → https 301, www → apex 301,
   HSTS, a strict CSP (scripts only from this site), `Permissions-Policy: serial=(self)` for Web Serial,
-  no framing, `noindex`. Fonts are self-hosted, so student Chromebooks talk to no third party.
+  no framing. Search engines may list only `/` and `/legal` (Dalton 2026-10-21): every other path,
+  every API answer, error and redirect sends `X-Robots-Tag: noindex, nofollow`, and robots.txt disallows
+  /teacher/, /api/, /display/ and the test pages. Fonts are self-hosted, so student Chromebooks talk to no third party.
 - Students: class phrase for anything that reaches the container (constant-time compare, expiry enforced), 40 previews a minute per Chromebook
   and 400 a minute for everyone (the bill guard), 10 MB upload cap, strict request validation. Power and
   speed only ever come from the teacher's presets in KV, and the container clamps them again.

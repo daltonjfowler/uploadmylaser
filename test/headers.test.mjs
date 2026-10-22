@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  canonicalRedirect, CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY, redirectTarget, STRICT_TRANSPORT_SECURITY,
+  canonicalRedirect, CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY, redirectTarget, ROBOTS_NOINDEX, STRICT_TRANSPORT_SECURITY,
   withSecurityHeaders,
 } from '../src/headers.ts';
 
@@ -54,6 +54,23 @@ test('every response gets the common headers', () => {
   assert.equal(r.headers.get('x-robots-tag'), 'noindex, nofollow');
   assert.equal(r.headers.get('permissions-policy'), PERMISSIONS_POLICY);
   assert.equal(r.headers.get('content-security-policy'), null, 'no CSP on a stylesheet');
+});
+
+test('search engines may list only the student page and /legal; everything else stays noindex', () => {
+  const html = (status = 200) => new Response('<p>', { status, headers: { 'content-type': 'text/html' } });
+  for (const path of ['/', '/index.html', '/legal', '/legal.html']) {
+    assert.equal(withSecurityHeaders(html(), 'asset', path).headers.get('x-robots-tag'), null, path);
+  }
+  for (const path of ['/teacher/', '/teacher/index.html', '/display/', '/serial-test', '/usb-test/', '/icon.svg', '/nope', '']) {
+    assert.equal(withSecurityHeaders(html(), 'asset', path).headers.get('x-robots-tag'), ROBOTS_NOINDEX, path);
+  }
+  assert.equal(withSecurityHeaders(html(404), 'asset', '/').headers.get('x-robots-tag'), ROBOTS_NOINDEX, 'a 404 is never listed');
+  assert.equal(withSecurityHeaders(new Response('{}'), 'json', '/').headers.get('x-robots-tag'), ROBOTS_NOINDEX, 'API');
+  assert.equal(canonicalRedirect('http://uploadmylaser.com/').headers.get('x-robots-tag'), ROBOTS_NOINDEX, 'redirects');
+  // a public page still gets every other security header
+  const r = withSecurityHeaders(html(), 'asset', '/');
+  assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  assert.equal(r.headers.get('content-security-policy'), CONTENT_SECURITY_POLICY);
 });
 
 test('Permissions-Policy allows Web Serial for this site (the laser connects over it)', () => {

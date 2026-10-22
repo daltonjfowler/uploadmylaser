@@ -1,2 +1,11 @@
+# The student page and /legal may be listed. Teacher, phrase display, API and test pages may not
+# (they also send X-Robots-Tag: noindex, see src/headers.ts).
 User-agent: *
-Disallow: /
+Allow: /
+Disallow: /teacher/
+Disallow: /api/
+Disallow: /display/
+Disallow: /serial-test
+Disallow: /usb-test/
+
+Sitemap: https://uploadmylaser.com/sitemap.xml

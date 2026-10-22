@@ -39,8 +39,12 @@ const COMMON_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ['referrer-policy', 'strict-origin-when-cross-origin'],
   ['permissions-policy', PERMISSIONS_POLICY],
   ['cross-origin-opener-policy', 'same-origin'],
-  ['x-robots-tag', 'noindex, nofollow'],
 ];
+
+// Search engines may list the student page and /legal (Dalton 2026-10-21). Everything else (teacher page,
+// phrase display, API, test pages, errors, redirects) keeps `noindex, nofollow`.
+export const PUBLIC_PAGES: ReadonlySet<string> = new Set(['/', '/index.html', '/legal', '/legal.html']);
+export const ROBOTS_NOINDEX = 'noindex, nofollow';
 
 function isHtml(r: Response): boolean {
   const type = r.headers.get('content-type') ?? '';
@@ -48,9 +52,12 @@ function isHtml(r: Response): boolean {
 }
 
 // Asset responses have immutable headers, so copy into a new Response first.
-export function withSecurityHeaders(response: Response, kind: ResponseKind): Response {
+// path: the request's pathname. Only a 200 for a public page goes without the noindex header.
+export function withSecurityHeaders(response: Response, kind: ResponseKind, path = ''): Response {
   const copy = new Response(response.body, response);
   for (const [name, value] of COMMON_HEADERS) copy.headers.set(name, value);
+  if (kind === 'json' || copy.status !== 200 || !PUBLIC_PAGES.has(path)) copy.headers.set('x-robots-tag', ROBOTS_NOINDEX);
+  else copy.headers.delete('x-robots-tag');
   if (kind === 'json') copy.headers.set('cache-control', 'no-store');
   if (kind === 'html' || (kind === 'asset' && isHtml(copy))) {
     copy.headers.set('content-security-policy', CONTENT_SECURITY_POLICY);

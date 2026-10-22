@@ -99,7 +99,7 @@ export default {
     const url = new URL(req.url);
     const isApi = url.pathname.startsWith('/api/');
     try {
-      if (!isApi) return withSecurityHeaders(await env.ASSETS.fetch(req), 'asset');
+      if (!isApi) return withSecurityHeaders(await env.ASSETS.fetch(req), 'asset', url.pathname);
       return withSecurityHeaders(await route(req, env, url), 'json');
     } catch (e) {
       if (e instanceof HttpError) return withSecurityHeaders(json(e.body ?? { error: e.message }, e.status, e.headers), 'json');
