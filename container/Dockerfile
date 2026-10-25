@@ -1,10 +1,10 @@
-# Pinned by digest (the multi-arch index of python:3.12-slim on 2026-09-27), so a rebuild can't pick up a
+# Pinned by digest (the multi-arch index of python:3.12-slim on 2026-10-25, Python 3.12.15), so a rebuild can't pick up a
 # different base. To update: docker pull python:3.12-slim, then docker inspect --format '{{.RepoDigests}}'.
 
 # --- DWG -> DXF (beta): LibreDWG's dwg2dxf, built from the GNU release, pinned by sha256 ---------------
 # GPL-3.0, run as a separate program by app/dwg.py (CREDITS.md). Only the one static binary is kept.
 # To update: change the version and the hash together (sha256sum of the .tar.xz from ftp.gnu.org).
-FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS dwg
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS dwg
 ARG LIBREDWG=0.14
 ARG LIBREDWG_SHA256=62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config xz-utils curl ca-certificates \
@@ -21,7 +21,7 @@ RUN cd /tmp && for m in https://ftpmirror.gnu.org https://mirrors.kernel.org/gnu
  && strip programs/dwg2dxf && cp programs/dwg2dxf /usr/local/bin/dwg2dxf && dwg2dxf --version
 
 # --- the processor ----------------------------------------------------------------------------------
-FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 # Fonts for the Text tool (ids in app/geometry/text_import.py and shared/contracts.ts TEXT_FONTS).
 # DejaVu comes from Debian. The rest are OFL/Apache fonts from github.com/google/fonts, pinned to one
