@@ -865,6 +865,8 @@ function insertLibrary(sh: PathShape): void {
 
 $('help').onclick = () => { $('helpDlg').hidden = false; };
 $('helpClose').onclick = () => { $('helpDlg').hidden = true; };
+$('about').onclick = () => { $('aboutDlg').hidden = false; }; // what the site is for (Dalton, 2026-10-28)
+$('aboutClose').onclick = () => { $('aboutDlg').hidden = true; };
 
 $('rotate').onclick = () => {
   const p = find(selected);
@@ -3236,7 +3238,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     // like AutoCAD: Esc ends the drawing and keeps what was drawn
     if (ws.drawing) { ws.finishDraft(); setTool('select'); return; }
-    for (const id of ['helpDlg', 'libraryDlg', 'patternDlg', 'boxDlg']) $(id).hidden = true;
+    for (const id of ['helpDlg', 'aboutDlg', 'libraryDlg', 'patternDlg', 'boxDlg']) $(id).hidden = true;
     select(null);
     return;
   }

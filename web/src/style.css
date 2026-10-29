@@ -227,6 +227,9 @@ body.display #net { position: fixed; right: 12px; bottom: 8px; margin: 0; color:
 
 /* dialogs: shapes library and help */
 .gate .card.wide { max-width: 760px; max-height: 88vh; overflow-y: auto; }
+.gate .card.about { max-width: 440px; }
+.about p { line-height: 1.5; }
+.about .aboutnote { color: var(--muted); font-size: .85rem; }
 .dlghead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .dlghead h2 { margin: 0; }
 .libgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-bottom: 8px; }
