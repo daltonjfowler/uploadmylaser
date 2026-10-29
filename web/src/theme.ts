@@ -10,9 +10,9 @@ const LABELS: Record<Pref, string> = { system: '🖥️ System', light: '☀️ 
 function load(): Pref {
   try {
     const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
+    return v === 'light' || v === 'system' ? v : 'dark'; // nothing saved: Dark (Dalton, 2026-10-28)
   } catch {
-    return 'system';
+    return 'dark';
   }
 }
 
@@ -32,8 +32,7 @@ export function initThemeButton(button: HTMLButtonElement): void {
   button.addEventListener('click', () => {
     pref = ORDER[(ORDER.indexOf(pref) + 1) % ORDER.length];
     try {
-      if (pref === 'system') localStorage.removeItem(KEY);
-      else localStorage.setItem(KEY, pref);
+      localStorage.setItem(KEY, pref); // System too: no key at all now means Dark
     } catch { /* storage blocked: still works for this page */ }
     apply();
   });
