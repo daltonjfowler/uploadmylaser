@@ -2938,7 +2938,6 @@ $('connect').onclick = async () => {
   }
   await connectLaser(pickerCancelled ? 'all' : 'auto');
 };
-$('usbDriver').hidden = !/Windows/.test(navigator.userAgent);
 // Pick first, change the connection after: Cancel, or picking the port already open, leaves a working
 // connection alone (Dalton 2026-10-05: failsafes must never lose the right connection).
 // ---------- menu size: drag the handle under the menus (Dalton 2026-10-08) ----------
@@ -3028,8 +3027,6 @@ function setConnected(on: boolean): void {
   $('status').title = id ? `USB ${id.vid.toString(16).padStart(4, '0')}:${(id.pid ?? 0).toString(16).padStart(4, '0')}` : '';
   $('status').classList.toggle('ok', on);
   $('connect').textContent = on ? 'Disconnect' : 'Connect laser';
-  // Only Windows lacks the FTDI driver out of the box (Chromebooks have it); gone once the laser is found.
-  $('usbDriver').hidden = on || !/Windows/.test(navigator.userAgent);
   $('stop').hidden = !on;
   $('stopTop').hidden = !on;
   updateButtons();
