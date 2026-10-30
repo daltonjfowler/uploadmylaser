@@ -2946,8 +2946,16 @@ const BARS_KEY = 'uml.barsZoom';
 const topbars = document.querySelector<HTMLElement>('.topbars')!;
 function setBarsZoom(z: number, save = true): number {
   z = Math.round(clamp(z, 0.7, 1.6) * 100) / 100;
-  if (z === 1) topbars.style.removeProperty('--bars-zoom');
-  else topbars.style.setProperty('--bars-zoom', String(z));
+  const apply = () => {
+    if (z === 1) topbars.style.removeProperty('--bars-zoom');
+    else topbars.style.setProperty('--bars-zoom', String(z));
+  };
+  apply();
+  // Never past half the screen: on a phone a finger on the handle zoomed them over the whole bed (Dalton 2026-10-30)
+  while (z > 1 && topbars.getBoundingClientRect().height > window.innerHeight / 2) {
+    z = Math.max(1, Math.round((z - 0.05) * 100) / 100);
+    apply();
+  }
   if (save) {
     try { localStorage.setItem(BARS_KEY, String(z)); } catch { /* fine */ }
   }
@@ -2977,6 +2985,21 @@ barsGrip.onkeydown = (e) => {
     e.preventDefault();
     setBarsZoom(barsZoom() + (e.key === 'ArrowDown' ? 0.05 : -0.05));
   }
+};
+
+// Help → Reset view: menu size, side panel width and folds, and the bed zoom. Never the design, theme,
+// units or laser port (Dalton 2026-10-30, after a phone got stuck with giant menus).
+$('resetView').onclick = () => {
+  setBarsZoom(1);
+  workarea.style.removeProperty('--panels-w');
+  for (const d of document.querySelectorAll<HTMLDetailsElement>('.panels details.panel')) d.open = true;
+  try {
+    localStorage.removeItem(PANELS_W);
+    localStorage.removeItem(PANELS_SHUT);
+  } catch { /* fine */ }
+  ws.fit();
+  $('helpDlg').hidden = true;
+  warn('View reset. Your design is still here.', '✓');
 };
 
 // Reset USB: close everything and reopen the same remembered laser port. No picker, nothing forgotten,

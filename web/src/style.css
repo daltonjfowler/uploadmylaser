@@ -230,8 +230,8 @@ body.display #net { position: fixed; right: 12px; bottom: 8px; margin: 0; color:
 .gate .card.about { max-width: 440px; }
 .about p { line-height: 1.5; }
 .about .aboutnote { color: var(--muted); font-size: .85rem; }
-.dlghead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.dlghead h2 { margin: 0; }
+.dlghead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.dlghead h2 { margin: 0 auto 0 0; }
 .libgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-bottom: 8px; }
 .libitem { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; font-size: .8rem; }
 .libitem svg { width: 54px; height: 54px; overflow: visible; }
