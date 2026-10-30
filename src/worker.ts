@@ -19,7 +19,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { MachineConfig, Material } from '../shared/contracts.ts';
 import { MAX_PARTS, MAX_UPLOAD_BYTES } from '../shared/contracts.ts';
 import { ipAllowed, parseCidrList, type Cidr } from './cidr.ts';
-import { anyKeyEquals, constantTimeEquals } from './constant-time.ts';
+import { constantTimeEquals } from './constant-time.ts';
 import { validateTestCard } from './testcard.ts';
 import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
@@ -37,6 +37,9 @@ import {
 } from './ratelimit.ts';
 import { DEFAULT_MACHINE, SEED_MATERIALS } from './seed.ts';
 import { minutesPhrase, TeacherKeyGuard, type GuardVerdict } from './teacher-guard.ts';
+import {
+  AccountError, accountRoute, checkCredential, logChange, readSignIn, setupAllows, signInOptions, type PasswordCredential, type Who,
+} from './teachers.ts';
 
 interface Env {
   ASSETS: Fetcher;
@@ -46,8 +49,10 @@ interface Env {
   PHRASE_IP_LIMIT: RateLimit; // wrangler.jsonc "ratelimits"
   PROCESS_IP_LIMIT: RateLimit;
   WRONG_PHRASE_IP_LIMIT: RateLimit; // counts wrong phrases only (src/wrong-ip.ts)
-  TEACHER_KEY?: string; // secret: npx wrangler secret put TEACHER_KEY
-  TEACHER_KEY_2?: string; // optional second teacher (a student teacher); delete the secret to remove them
+  TEACHERS_KV?: KVNamespace; // teacher accounts, shared by all four uploadmy sites (src/teachers.ts)
+  TEACHER_SESSION_KEY?: string; // secret: signs this site's teacher sessions
+  TEACHER_KEY?: string; // old shared key (secret), still accepted until it is deleted
+  TEACHER_KEY_2?: string; // old second shared key (a student teacher); delete the secret to remove it
   ALLOWED_CIDRS?: string;
 }
 
@@ -103,6 +108,7 @@ export default {
       return withSecurityHeaders(await route(req, env, url), 'json');
     } catch (e) {
       if (e instanceof HttpError) return withSecurityHeaders(json(e.body ?? { error: e.message }, e.status, e.headers), 'json');
+      if (e instanceof AccountError) return withSecurityHeaders(json({ error: e.message }, e.status), 'json');
       console.error(JSON.stringify({ message: 'unhandled worker error', path: url.pathname, error: String(e) }));
       return withSecurityHeaders(json({ error: 'Something went wrong on the server. Tell your teacher.' }, 500), 'json');
     }
@@ -124,20 +130,31 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (p === '/api/process' && m === 'POST') return processDesign(req, env);
   if (p === '/api/convert-dwg' && m === 'POST') return convertDwg(req, env);
 
-  // Everything under /api/teacher/ needs the key, even paths that do not exist.
+  // The teacher sign-in list: names only.
+  if (p === '/api/teachers' && m === 'GET') return json(await signInOptions(env));
+
+  // Everything under /api/teacher/ needs a teacher, even paths that do not exist. Signing in sends the
+  // name and password in the body; every other call sends the session (or old shared key) in x-teacher-key.
   if (p.startsWith('/api/teacher/')) {
-    await teacherGate(req, env);
+    const cred = p === '/api/teacher/signin' && m === 'POST' ? await readSignIn(req) : req.headers.get('x-teacher-key') ?? '';
+    const who = await teacherGate(req, env, cred);
+    if (who.setup && !setupAllows(p)) throw new HttpError(403, 'Choose your own password first.');
+    const account = await accountRoute(req, p, env, env.CLASS_KV, who, cred, Date.now());
+    if (account) return account;
+    const changed = (what: string) => logChange(env.CLASS_KV, who, what, Date.now());
     if (p === '/api/teacher/config' && m === 'GET') {
       return json({ materials: await getMaterials(env), machine: await getMachine(env), phraseSet: !!(await readActivePhrase(env)) });
     }
     if (p === '/api/teacher/materials' && m === 'PUT') {
       const mats = validateMaterials(await readJson(req, MAX_MATERIALS_BYTES), await getMachine(env));
       await env.CLASS_KV.put(KV_MATERIALS, JSON.stringify(mats));
+      await changed('Saved materials');
       return json({ ok: true });
     }
     if (p === '/api/teacher/machine' && m === 'PUT') {
       const mc = validateMachine(await readJson(req, MAX_TEACHER_BYTES));
       await env.CLASS_KV.put(KV_MACHINE, JSON.stringify(mc));
+      await changed('Saved machine settings');
       return json({ ok: true });
     }
     if (p === '/api/teacher/phrase') {
@@ -145,9 +162,14 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
         const rec = await readActivePhrase(env);
         return json({ phrase: rec?.phrase ?? null, expiresAt: rec?.expiresAt ?? null });
       }
-      if (m === 'POST') return setPhrase(req, env);
+      if (m === 'POST') {
+        const r = await setPhrase(req, env);
+        await changed('Set the class phrase');
+        return r;
+      }
       if (m === 'DELETE') {
         await env.CLASS_KV.delete(PHRASE_KEY);
+        await changed('Ended the class phrase');
         return json({ ok: true });
       }
     }
@@ -330,20 +352,24 @@ function lockoutStore(): LockoutStore {
 
 // The per-device lockout runs first (Dalton, 2026-09-28: 5 wrong tries lock that device, growing), and
 // a locked device is refused before any compare. Past that, the key is compared before the site-wide
-// guard, so the guard never refuses a correct key; only a wrong key touches it. No secret uploaded
-// means no teacher endpoint at all: never fall open.
-async function teacherGate(req: Request, env: Env): Promise<void> {
-  const who = lockoutSubject(req.headers.get('x-device-id'), req.headers.get('cf-connecting-ip') ?? '');
+// guard, so the guard never refuses a correct key; only a wrong key touches it. A wrong password, start
+// code or session counts exactly like a wrong key (src/teachers.ts). Nothing set up means no teacher
+// endpoint at all: never fall open.
+async function teacherGate(req: Request, env: Env, cred: string | PasswordCredential): Promise<Who> {
+  const device = lockoutSubject(req.headers.get('x-device-id'), req.headers.get('cf-connecting-ip') ?? '');
   const store = lockoutStore();
-  const prior = await checkLockout(store, 'teacher', who, Date.now());
-  const keys = [env.TEACHER_KEY, env.TEACHER_KEY_2].filter((k): k is string => !!k);
-  if (!keys.length) console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
-  else if (await anyKeyEquals(req.headers.get('x-teacher-key') ?? '', keys)) {
-    await recordRight(store, 'teacher', who, prior);
-    return;
+  const prior = await checkLockout(store, 'teacher', device, Date.now());
+  if (!env.TEACHER_KEY && !env.TEACHER_KEY_2 && !(env.TEACHERS_KV && env.TEACHER_SESSION_KEY)) {
+    console.error(JSON.stringify({ message: 'no teacher key or accounts set up; teacher endpoint refused' }));
+  } else {
+    const who = await checkCredential(env, cred, Date.now());
+    if (who) {
+      await recordRight(store, 'teacher', device, prior);
+      return who;
+    }
   }
 
-  await recordWrong(store, 'teacher', who, prior, Date.now());
+  await recordWrong(store, 'teacher', device, prior, Date.now());
   const guard = await countersStub(env).recordWrongTeacherKey();
   await sleep(TEACHER_REJECT_DELAY_MS);
   if (guard.locked) {

@@ -19,12 +19,16 @@
   },
   "kv_namespaces": [
     // This app's own namespace. Never reuse uploadmycode's.
-    { "binding": "CLASS_KV", "id": "812c0c759168406aa12bc0470b50e986" }
+    { "binding": "CLASS_KV", "id": "812c0c759168406aa12bc0470b50e986" },
+    // Teacher accounts (src/teachers.ts): ONE namespace shared by all four uploadmy sites on purpose,
+    // so a password works everywhere. Holds names and salted password hashes, never passwords.
+    { "binding": "TEACHERS_KV", "id": "6c37dd40d71545e989448c728031746e" }
   ],
   "vars": {
     "ALLOWED_CIDRS": ""
   },
-  // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
+  // Secrets: TEACHER_SESSION_KEY signs teacher sessions; TEACHER_KEY (+ _2) is the old shared key, still
+  // accepted until deleted. npx wrangler secret put <NAME>, value piped in, never typed on the command line.
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "containers": [
     {

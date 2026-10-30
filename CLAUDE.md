@@ -14,6 +14,11 @@ anything not marked verified there as a guess.
 - `src/lockout.ts`: per-DEVICE wrong-try lockout on the class phrase and teacher key (`x-device-id` from
   `web/src/device.ts`, IP only when no valid id). 5 wrong in a row lock 5 s, doubling to 300 s; right answer
   clears; Cache API, falls open. No per-IP penalty, so a student cannot lock the teacher or the class out.
+- Teacher accounts (Dalton 2026-10-30): `src/teachers.ts` (server) and `web/src/teacher-account.ts` + `.css`
+  (teacher page) are the SAME files on all four uploadmy sites: change one, copy to all four. Each teacher picks
+  their own password (start code first); accounts live in the shared `TEACHERS_KV` namespace, sessions are signed
+  with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) still
+  works until those secrets are deleted. Teacher changes are logged with the name (`logChange`, "Recent changes").
 - `web/`: Vite multi-page (index, teacher/, display/). `serial-test.html` is dev-only and must stay
   OUT of the production build (it sends raw bytes to the laser). No framework. Keep the bundle small, since
   Chromebooks are slow. `workspace.ts` is the canvas, `main.ts` the app state, `shapes.ts` draws Box/Circle as SVG.

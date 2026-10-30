@@ -33,7 +33,7 @@ function draw(): void {
     el.style.setProperty('--chars', '13');
     $('sub').textContent = ended;
   } else if (state === 'nokey') {
-    el.textContent = 'Open the teacher page on this computer and press "Remember on this machine".';
+    el.textContent = 'Sign in on the teacher page on this computer, then open this window again.';
     el.style.setProperty('--chars', '40');
     $('sub').textContent = '';
   } else {

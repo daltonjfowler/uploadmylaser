@@ -9,18 +9,29 @@ import { LaserLink } from './serial/laser';
 import { OP_LABELS } from './ops';
 import { generatePhrase } from './phrase-words';
 import { initThemeButton } from './theme';
+import { mountAccount } from './teacher-account';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const KEY_STORAGE = 'uml.teacherKey'; // display.ts reads the same entry
+const KEY_STORAGE = 'uml.teacherKey'; // the sign-in (display.ts reads the same entry)
 const OPS: OpKind[] = ['cut', 'score', 'engrave'];
 let materials: Material[] = [];
 let machine: MachineConfig;
 
-const keyInput = $<HTMLInputElement>('key');
 const phraseInput = $<HTMLInputElement>('phrase');
 
+const account = mountAccount({
+  root: $('account'),
+  storageKey: KEY_STORAGE,
+  headers: () => ({ 'x-device-id': deviceId() }),
+  onSignedIn: () => void refresh(),
+  onSignedOut: () => {
+    $('panel').hidden = true;
+    say('');
+  },
+});
+
 function key(): string {
-  return keyInput.value.trim();
+  return account.credential();
 }
 
 class ApiError extends Error {
@@ -28,7 +39,7 @@ class ApiError extends Error {
 }
 
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  if (!key()) throw new ApiError(0, 'Type the teacher key first.');
+  if (!key()) throw new ApiError(0, 'Sign in first (top of this page).');
   let r: Response;
   try {
     r = await fetch(path, {
@@ -40,7 +51,12 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
     throw new ApiError(0, 'Could not reach the server. Check the network.');
   }
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new ApiError(r.status, 'That teacher key was refused. Check it and try again.');
+  if (r.status === 401) {
+    account.refused();
+    throw new ApiError(r.status, 'Your sign-in ended. Sign in again at the top of this page.');
+  }
+  if (r.status === 403) throw new ApiError(r.status, j.error ?? 'Not allowed.');
+  if (r.ok && method !== 'GET') account.refreshChanges();
   // 429 comes from the site-wide wrong-key guard (sentence in `error`) or the per-IP lockout
   // (`error: 'locked'`, sentence in `message`); both sentences carry the wait.
   if (r.status === 429 && j.error === 'locked' && typeof j.message === 'string') throw new ApiError(r.status, j.message);
@@ -53,35 +69,9 @@ function say(text: string, tone: 'plain' | 'ok' | 'error' = 'plain'): void {
   $('message').dataset.tone = tone;
 }
 
-// ---------- key ----------
-
-let offered = false;
-/** Once a key works, ask the browser's password manager to keep it (Chrome and Edge show "Save password?"). */
-function offerToSaveKey(): void {
-  const PC = (window as unknown as { PasswordCredential?: new (d: { id: string; password: string; name: string }) => Credential }).PasswordCredential;
-  if (offered || !PC || !navigator.credentials?.store) return;
-  offered = true;
-  navigator.credentials.store(new PC({ id: 'teacher', password: key(), name: 'Teacher key' })).catch(() => { /* declined or not allowed */ });
-}
-
 function loadKey(): string {
   try { return localStorage.getItem(KEY_STORAGE) ?? ''; } catch { return ''; }
 }
-
-$('remember').onclick = () => {
-  try {
-    localStorage.setItem(KEY_STORAGE, key());
-    say('Key saved in this browser.', 'ok');
-  } catch {
-    say('This browser will not let the page save the key. Type it each time.', 'error');
-  }
-};
-$('forget').onclick = () => {
-  try { localStorage.removeItem(KEY_STORAGE); } catch { /* nothing saved */ }
-  keyInput.value = '';
-  $('panel').hidden = true;
-  say('Key forgotten on this device.', 'ok');
-};
 
 // ---------- phrase ----------
 
@@ -129,7 +119,6 @@ async function refresh(okText = 'Up to date.'): Promise<boolean> {
   try {
     show(await api<PhraseState>('/api/teacher/phrase'));
     say(okText, 'ok');
-    offerToSaveKey();
     if ($('panel').hidden) await loadSettings();
     return true;
   } catch (e) {
@@ -189,8 +178,8 @@ $('end').onclick = async () => {
   }
 };
 $('popout').onclick = () => {
-  // The window reads the key from localStorage, so "Remember on this machine" must have been pressed.
-  if (!loadKey()) return say('Press "Remember on this machine" first, so the pop-out window can read the phrase.', 'error');
+  // The window reads the sign-in from localStorage (blocked storage: it cannot).
+  if (!loadKey()) return say('This browser does not keep the sign-in, so the pop-out window cannot read the phrase.', 'error');
   const w = window.open('/display/', 'uml-phrase-display', 'width=1000,height=420');
   if (!w) return say('Your browser blocked the pop-out. Allow pop-ups for this site and try again.', 'error');
   say('Phrase window opened. Drag it onto the projector screen.', 'ok');
@@ -206,7 +195,6 @@ $('warmup').onclick = async () => {
 };
 
 phraseInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('set').click(); });
-$('keyForm').addEventListener('submit', (e) => { e.preventDefault(); void refresh(); });
 
 async function loadSettings(): Promise<void> {
   const cfg = await api<{ materials: Material[]; machine: MachineConfig }>('/api/teacher/config');
@@ -349,11 +337,9 @@ $('saveMachine').onclick = async () => {
 };
 
 initThemeButton($<HTMLButtonElement>('theme'));
-keyInput.value = loadKey();
 phraseInput.value = generatePhrase();
 setInterval(tick, 1000);
-tick();
-if (keyInput.value) void refresh(); // a remembered key shows what is live without a click
+tick(); // a remembered sign-in shows what is live without a click (mountAccount → onSignedIn)
 
 // ---------- material test card ----------
 
