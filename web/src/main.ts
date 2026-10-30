@@ -1776,7 +1776,7 @@ function menuItems(name: string): MenuItem[] {
       ['Text', () => $('toolText').click()], ['Box', () => $('toolBox').click()], ['Circle', () => $('toolCircle').click()],
       ['Line', () => $('toolLine').click()], ['Curve', () => $('toolCurve').click()], ['Shapes…', () => $('toolShapes').click()], null,
       ['Box maker…', () => $('toolBoxMaker').click()], ['Trace an image…', () => pickPicture('trace')], ['Engrave a photo…', () => pickPicture('dither')], null,
-      ['Pattern (copies in rows)…', () => $('toolPattern').click(), selected === null],
+      ['Pattern (copies in rows)…', () => $('toolPattern').click(), !n],
     ];
     case 'view': return [
       act('Zoom in', 'zoomIn'), act('Zoom out', 'zoomOut'), act('Whole bed', 'zoomBed'), act('My design', 'zoomDesign'), null,
@@ -2631,9 +2631,8 @@ $<HTMLFormElement>('boxForm').onsubmit = (ev) => {
 // ---------- pattern tool ----------
 
 $('toolPattern').onclick = () => {
-  const p = find(selected);
-  if (!p) {
-    notes = ['Select a part first, then use Pattern to make copies of it.'];
+  if (!selection().length) {
+    notes = ['Select a part (or a group) first, then use Pattern to make copies of it.'];
     render();
     return;
   }
@@ -2651,27 +2650,29 @@ function patternValues(): { cols: number; rows: number; gx: number; gy: number }
 
 function updatePatternInfo(): void {
   const { cols, rows } = patternValues();
+  const n = selection().length;
   const copies = cols * rows - 1;
   const room = MAX_PARTS - parts.length;
-  $('patInfo').textContent = copies > room
-    ? `That's ${copies} copies, but there's only room for ${room} more parts (${MAX_PARTS} max).`
-    : `${cols} × ${rows}: ${copies} ${copies === 1 ? 'copy' : 'copies'}, laid out to the left and down from the selected part.`;
+  $('patInfo').textContent = copies * n > room
+    ? `That's ${copies * n} new parts, but there's only room for ${room} more (${MAX_PARTS} max).`
+    : `${cols} × ${rows}: ${copies} ${copies === 1 ? 'copy' : 'copies'}, laid out to the left and down from the selected ${n === 1 ? 'part' : 'parts'}.`;
 }
 
+/** The whole selection is one tile: copies step by its outer box, and groups inside it stay groups. */
 $<HTMLFormElement>('patternForm').onsubmit = (ev) => {
   ev.preventDefault();
-  const p = find(selected);
-  const b = p && boxOf(p.id);
-  if (!p || !b) return;
+  const has = new Set(selection());
+  const ps = parts.filter((p) => has.has(p.id));
+  const b = unionBox(ps.map((p) => boxOf(p.id)));
+  if (!ps.length || !b) return;
   const { cols, rows, gx, gy } = patternValues();
-  if (cols * rows - 1 > MAX_PARTS - parts.length) return updatePatternInfo();
+  if ((cols * rows - 1) * ps.length > MAX_PARTS - parts.length) return updatePatternInfo();
   const w = b[2] - b[0];
   const h = b[3] - b[1];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       if (!r && !c) continue;
-      const [copy] = cloneParts([p]);
-      parts.push({ ...copy, id: nextId++, xMm: round(p.xMm - c * (w + gx)), yMm: round(p.yMm + r * (h + gy)) });
+      parts.push(...copiesOf(ps, -c * (w + gx), r * (h + gy)));
     }
   }
   $('patternDlg').hidden = true;
