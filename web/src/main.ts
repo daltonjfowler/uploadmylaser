@@ -2922,7 +2922,7 @@ async function connectLaser(pick: 'auto' | 'filtered' | 'all', chosen?: SerialPo
       // Picker cancelled, maybe because the laser wasn't listed. On Windows that usually means the FTDI
       // driver is missing or still downloading on a laptop that never had the laser plugged in (2026-10-10).
       warn(/Windows/.test(navigator.userAgent)
-        ? 'Laser not in the list? Check the laser is on and the USB cable is in. On a laptop that is new to the laser, Windows needs about a minute to set it up: wait, unplug the cable, plug it back in, then press Connect laser again. Still missing: this laptop needs the laser\'s USB driver. Ask your teacher (Help has the steps).'
+        ? 'Laser not in the list? Check the laser is on and the USB cable is in. On a laptop that is new to the laser, Windows needs about a minute to set it up: wait, unplug the cable, plug it back in, then press Connect laser again. Still missing: this laptop needs the laser\'s USB driver. Ask your teacher (⬇ USB driver at the top).'
         : 'Laser not in the list? Check the USB cable is in and the laser is switched on, then press Connect laser again. Still missing: Help has steps for your teacher.');
       pickerCancelled = true;
     } else warn(`${(e as Error).message} Or press Choose USB port… to pick the laser again.`);
@@ -2938,6 +2938,7 @@ $('connect').onclick = async () => {
   }
   await connectLaser(pickerCancelled ? 'all' : 'auto');
 };
+$('usbDriver').hidden = !/Windows/.test(navigator.userAgent);
 // Pick first, change the connection after: Cancel, or picking the port already open, leaves a working
 // connection alone (Dalton 2026-10-05: failsafes must never lose the right connection).
 // ---------- menu size: drag the handle under the menus (Dalton 2026-10-08) ----------
@@ -3027,6 +3028,8 @@ function setConnected(on: boolean): void {
   $('status').title = id ? `USB ${id.vid.toString(16).padStart(4, '0')}:${(id.pid ?? 0).toString(16).padStart(4, '0')}` : '';
   $('status').classList.toggle('ok', on);
   $('connect').textContent = on ? 'Disconnect' : 'Connect laser';
+  // Only Windows lacks the FTDI driver out of the box (Chromebooks have it); gone once the laser is found.
+  $('usbDriver').hidden = on || !/Windows/.test(navigator.userAgent);
   $('stop').hidden = !on;
   $('stopTop').hidden = !on;
   updateButtons();

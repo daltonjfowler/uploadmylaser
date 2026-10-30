@@ -39,6 +39,7 @@
     <button id="connect" class="primary" data-hint="Plug the laser's USB cable into this computer first.">Connect laser</button>
     <button id="resetUsb" class="toplink" type="button" data-hint="Laser stuck or not answering? Closes the USB connection and opens the same laser port again. Forgets nothing.">↻ Reset USB</button>
     <button id="pickPort" class="toplink" type="button" data-hint="Laser not found, or the wrong USB port? This always shows the list of every USB port to pick from.">Choose USB port…</button>
+    <a id="usbDriver" class="toplink" href="https://ftdichip.com/drivers/vcp-drivers/" target="_blank" rel="noopener" hidden data-hint="Windows laptop new to the laser? Install the laser's USB driver once (needs an administrator), and the laser shows up in seconds. Under Windows, take the setup executable.">⬇ USB driver</a>
     <button id="stopTop" class="stop" hidden data-hint="Stops the laser right away. Esc does the same.">STOP</button>
   </header>
 
@@ -319,7 +320,7 @@
             <li><b>Connect laser</b> lists every USB port. The laser is often called <i>USB Serial Port (COM…)</i>. Picked the wrong one? <b>Choose USB port…</b> shows the list again.</li>
             <li>Stuck, or a Send that never ends: <b>↻ Reset USB</b>. Still stuck: unplug the USB cable, plug it back in, and reload the page.</li>
             <li><b>Windows laptop that never had the laser plugged in:</b> Windows sets the laser up the first time, which takes about a minute. Wait, unplug the cable, plug it back in, then press <b>Connect laser</b>.</li>
-            <li><b>For teachers, Windows laptops:</b> still never in the list? Student accounts cannot install drivers, and some laptops are not allowed to fetch them. An administrator installs the FTDI USB driver once (IT can push it to every laptop). If the laser is never in the list, plug it in and open Device Manager. Under <i>Universal Serial Bus controllers</i>, open <i>USB Serial Converter</i> → Properties → Advanced, tick <b>Load VCP</b>, OK, then unplug and replug. It should now show under <i>Ports (COM &amp; LPT)</i>. A yellow warning sign there means the FTDI driver is missing (ask IT).</li>
+            <li><b>For teachers, Windows laptops:</b> still never in the list? Student accounts cannot install drivers, and some laptops are not allowed to fetch them. An administrator installs the FTDI USB driver once (IT can push it to every laptop): on <a href="https://ftdichip.com/drivers/vcp-drivers/" target="_blank" rel="noopener">FTDI's driver page</a>, take the <i>setup executable</i> in the Windows row and run it. Then a new laptop finds the laser in seconds instead of waiting for Windows Update. If the laser is never in the list, plug it in and open Device Manager. Under <i>Universal Serial Bus controllers</i>, open <i>USB Serial Converter</i> → Properties → Advanced, tick <b>Load VCP</b>, OK, then unplug and replug. It should now show under <i>Ports (COM &amp; LPT)</i>. A yellow warning sign there means the FTDI driver is missing (ask IT).</li>
           </ul>
         </section>
       </div>
