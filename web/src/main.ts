@@ -3291,7 +3291,7 @@ let toastTimer = 0;
 function warn(text: string, mark = '⚠'): void {
   notes = [text];
   const t = $('toast');
-  t.textContent = `${mark} ${text}`;
+  $('toastText').textContent = `${mark} ${text}`;
   t.hidden = false;
   clearTimeout(toastTimer);
   // the E-stop warning stays until clicked: a Send that fails right after must not hide it

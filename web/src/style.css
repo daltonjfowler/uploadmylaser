@@ -257,7 +257,11 @@ kbd { font: 600 .8rem ui-monospace, Consolas, monospace; padding: 1px 5px; borde
 .dimbox input { width: 6em; }
 .toast { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); max-width: min(90%, 560px); padding: 8px 14px;
   background: #fef3c7; color: #78350f; border: 2px solid #d97706; border-radius: 10px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.2); cursor: pointer; z-index: 6; }
+.toast { display: flex; align-items: flex-start; gap: 10px; }
 .toast[hidden] { display: none; }
+.toastx { flex: none; min-width: 28px; min-height: 28px; margin: -4px -8px -4px 0; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.toastx:hover, .toastx:focus-visible { background: rgba(120, 53, 15, .15); }
 .lenbox input { width: 7em; }
 .palette { justify-content: space-between; flex-wrap: wrap; }
 .palrow, .matchips { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
