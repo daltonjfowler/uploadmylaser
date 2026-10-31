@@ -14,6 +14,9 @@
 //   deleted, so nobody is locked out during the switch.
 // - Wrong tries go through each site's own lockout: the site's teacher gate calls `checkCredential`
 //   and counts a null answer as a wrong key, exactly as it counted a wrong shared key.
+// - On top of that, each NAME pauses after 10 wrong passwords in a row (on any of the four sites,
+//   from anywhere): 1 minute, doubling to 15 (Dalton 2026-10-30). Sessions keep working, so a student
+//   typing wrong passwords for a teacher can only delay that teacher signing in on a new computer.
 //
 // No Workers-only APIs (the tests run it in Node).
 
@@ -45,6 +48,11 @@ const SETUP_MINUTES = 30;
 const START_CODE_DAYS = 7;
 const ITERATIONS = 100_000; // the most PBKDF2 rounds Workers allow
 const PERSON = 'person:';
+const FAILS = 'fails:';
+export const FREE_WRONG = 10; // wrong passwords in a row before a name pauses
+const PAUSE_MS = 60_000;
+const MAX_PAUSE_MS = 15 * 60_000;
+const LIST_CACHE_MS = 30_000;
 const LOG_KEY = 'teacher-log';
 const LOG_MAX = 25;
 const SHARED_NAME = 'Shared key';
@@ -141,6 +149,7 @@ async function readPerson(store: KvLike, id: string, cached = false): Promise<Pe
 async function writePerson(store: KvLike, p: Person): Promise<void> {
   const meta: Meta = { name: p.name, ready: !!p.pw };
   await store.put(PERSON + p.id, JSON.stringify(p), { metadata: meta });
+  listCache = null;
 }
 
 /** The sign-in list (public): names only, never anything secret. */
@@ -160,10 +169,16 @@ export async function listPeople(env: TeacherEnv): Promise<{ id: string; name: s
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// The public list, kept 30 s per isolate: anyone can ask for it, and every KV list is billed.
+let listCache: { kv: KvLike | undefined; at: number; people: { id: string; name: string; ready: boolean }[] } | null = null;
+
 /** What the public GET /api/teachers answers: who can sign in, and whether the old shared key still works. */
-export async function signInOptions(env: TeacherEnv): Promise<{ people: { id: string; name: string; ready: boolean }[]; shared: boolean; accounts: boolean }> {
+export async function signInOptions(env: TeacherEnv, now = Date.now()): Promise<{ people: { id: string; name: string; ready: boolean }[]; shared: boolean; accounts: boolean }> {
+  if (!listCache || listCache.kv !== env.TEACHERS_KV || now - listCache.at > LIST_CACHE_MS || now < listCache.at) {
+    listCache = { kv: env.TEACHERS_KV, at: now, people: await listPeople(env) };
+  }
   return {
-    people: await listPeople(env),
+    people: listCache.people,
     shared: !!(env.TEACHER_KEY || env.TEACHER_KEY_2),
     accounts: !!(env.TEACHERS_KV && env.TEACHER_SESSION_KEY),
   };
@@ -226,11 +241,29 @@ async function checkPassword(env: TeacherEnv, c: PasswordCredential, now: number
     await derive(c.password, new Uint8Array(16), ITERATIONS); // same time as a real account
     return null;
   }
-  if (await matches(c.password, p.pw)) return { id: p.id, name: p.name, via: 'account', setup: false };
-  if (p.start && p.start.exp > now && (await matches(normalizeCode(c.password), p.start))) {
-    return { id: p.id, name: p.name, via: 'account', setup: true };
+  // A paused name is refused before anything is compared, so a pause really stops guessing.
+  const fails = ((await store.get(FAILS + p.id, { type: 'json' })) as { n: number; until: number } | null) ?? { n: 0, until: 0 };
+  if (fails.until > now) {
+    const min = Math.ceil((fails.until - now) / 60_000);
+    throw new AccountError(429, `Too many wrong passwords for ${p.name}. Sign-in for ${p.name} is paused for ${min} minute${min === 1 ? '' : 's'}. A computer that is already signed in still works.`);
   }
-  return null;
+  let who: Who | null = null;
+  if (await matches(c.password, p.pw)) who = { id: p.id, name: p.name, via: 'account', setup: false };
+  else if (p.start && p.start.exp > now && (await matches(normalizeCode(c.password), p.start))) {
+    who = { id: p.id, name: p.name, via: 'account', setup: true };
+  }
+  try {
+    if (who) {
+      if (fails.n) await store.delete(FAILS + p.id);
+    } else {
+      const n = fails.n + 1;
+      const until = n >= FREE_WRONG ? now + Math.min(MAX_PAUSE_MS, PAUSE_MS * 2 ** (n - FREE_WRONG)) : 0;
+      await store.put(FAILS + p.id, JSON.stringify({ n, until }), { expirationTtl: 86_400 });
+    }
+  } catch (e) {
+    console.error(JSON.stringify({ message: 'wrong-password count not saved', error: String(e) }));
+  }
+  return who;
 }
 
 /**
@@ -354,14 +387,18 @@ async function route(req: Request, path: string, env: TeacherEnv, siteKv: KvLike
     if (!p) throw new AccountError(404, 'There is no such teacher.');
     if (path === '/api/teacher/people/startcode' && m === 'POST') {
       // Their old password stops working and every session of theirs ends: the code is the only way in.
+      // A teacher is helping on purpose, so a wrong-password pause on that name ends too.
       const code = newCode();
       await writePerson(store, { id: p.id, name: p.name, ver: p.ver + 1, start: { ...(await makeSecret(normalizeCode(code))), exp: now + START_CODE_DAYS * 86_400_000 } });
+      await store.delete(FAILS + p.id);
       await logChange(siteKv, who, `Made a new start code for ${p.name}`, now);
       return reply({ id: p.id, name: p.name, code, days: START_CODE_DAYS });
     }
     if (path === '/api/teacher/people' && m === 'DELETE') {
       if (p.id === who.id) throw new AccountError(400, 'You cannot remove yourself. Ask another teacher.');
       await store.delete(PERSON + p.id);
+      await store.delete(FAILS + p.id);
+      listCache = null;
       await logChange(siteKv, who, `Removed ${p.name}`, now);
       return reply({ ok: true });
     }

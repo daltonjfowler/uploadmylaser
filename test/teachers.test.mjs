@@ -149,6 +149,33 @@ test('teachers can remove each other but not themselves; unknown names are refus
   assert.equal((await call(env, site, '/api/teacher/people/startcode', 'POST', { id: 'nobody' }, t)).status, 404);
 });
 
+test('10 wrong passwords pause that name (growing), even for the right password; sessions keep working', async () => {
+  const { env, site } = setup();
+  const { code } = await addTeacher(env, site, 'Peter');
+  const s = await call(env, site, '/api/teacher/signin', 'POST', null, { id: 'peter', password: code });
+  const token = (await call(env, site, '/api/teacher/password', 'POST', { next: 'peters password' }, s.body.token)).body.token;
+  const right = { id: 'peter', password: 'peters password' };
+  const wrong = { id: 'peter', password: 'not peters password' };
+  // a right password clears the count
+  for (let i = 0; i < 9; i++) assert.equal(await checkCredential(env, wrong, NOW), null);
+  assert.ok(await checkCredential(env, right, NOW));
+  for (let i = 0; i < 10; i++) assert.equal(await checkCredential(env, wrong, NOW), null);
+  await assert.rejects(checkCredential(env, right, NOW), (e) => e.status === 429 && /paused for 1 minute/.test(e.message));
+  assert.ok(await checkCredential(env, token, NOW), 'a signed-in computer still works');
+  // after the pause one more wrong pauses it for 2 minutes
+  const later = NOW + 61_000;
+  assert.equal(await checkCredential(env, wrong, later), null);
+  await assert.rejects(checkCredential(env, right, later + 60_000), (e) => /paused for 1 minute/.test(e.message));
+  assert.ok(await checkCredential(env, right, later + 121_000), 'the pause ends');
+  // another teacher's start code ends a pause at once
+  for (let i = 0; i < 10; i++) await checkCredential(env, wrong, later + 200_000);
+  const fresh = await call(env, site, '/api/teacher/people/startcode', 'POST', { id: 'peter' }, SHARED, later + 200_000);
+  assert.equal((await checkCredential(env, { id: 'peter', password: fresh.body.code }, later + 200_000)).setup, true);
+  // other names are not paused
+  const { code: axel } = await addTeacher(env, site, 'Axel');
+  assert.equal((await checkCredential(env, { id: 'axel', password: axel }, NOW)).setup, true);
+});
+
 test('a start-code session cannot manage accounts', async () => {
   const { env, site } = setup();
   const { code } = await addTeacher(env, site, 'Axel');

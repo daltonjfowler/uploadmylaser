@@ -51,6 +51,7 @@ export function mountAccount(o: AccountOptions): Account {
   try { cred = localStorage.getItem(o.storageKey) ?? ''; } catch { /* storage blocked: this tab only */ }
   let me: Me | null = null;
   let changesBox: HTMLElement | null = null;
+  let peopleDrawn = 0;
 
   const save = (c: string) => {
     cred = c;
@@ -256,8 +257,8 @@ export function mountAccount(o: AccountOptions): Account {
       };
     };
 
+    // Opened in code above too: the toggle event for that comes later, so this one listener draws it once.
     people.addEventListener('toggle', () => { if (people.open) void renderPeople(people); });
-    if (people.open) void renderPeople(people);
     refreshChanges();
     o.onSignedIn();
   }
@@ -281,7 +282,32 @@ export function mountAccount(o: AccountOptions): Account {
     };
     if (made) showCode(made.name, made.code, made.days);
 
-    const r = await call<{ people: Person[] }>('/api/teacher/people');
+    // Wired before the list loads: a quick click must never reach a form with no handler (a page reload).
+    addForm.onsubmit = async (e) => {
+      e.preventDefault();
+      if (!name.value.trim()) return say('Type the teacher\'s first name.', 'error');
+      add.disabled = true;
+      try {
+        const c = await call<{ code: string; name: string; days: number }>('/api/teacher/people', 'POST', { name: name.value });
+        if (c.status === 401) return refused();
+        if (c.status !== 200) return say(errorText(c.status, c.data), 'error');
+        say(`${c.data.name} was added.`, 'ok');
+        refreshChanges();
+        await renderPeople(box, c.data);
+      } catch {
+        say('Could not reach the server. Check the network.', 'error');
+      } finally {
+        add.disabled = false;
+      }
+    };
+
+    const gen = ++peopleDrawn;
+    const r = await call<{ people: Person[] }>('/api/teacher/people').catch(() => null);
+    if (gen !== peopleDrawn) return; // a newer draw is on its way
+    if (!r) {
+      list.replaceChildren(h('li', {}, 'Could not reach the server. Check the network.'));
+      return;
+    }
     if (r.status === 401) return refused();
     if (r.status !== 200) {
       list.replaceChildren(h('li', {}, errorText(r.status, r.data)));
@@ -314,22 +340,6 @@ export function mountAccount(o: AccountOptions): Account {
         ...(mine ? [] : [code, remove]));
     }));
     if (!r.data.people.length) list.replaceChildren(h('li', { class: 'ta-note' }, 'No teacher accounts yet. Add yourself first.'));
-
-    addForm.onsubmit = async (e) => {
-      e.preventDefault();
-      if (!name.value.trim()) return say('Type the teacher\'s first name.', 'error');
-      add.disabled = true;
-      try {
-        const c = await call<{ code: string; name: string; days: number }>('/api/teacher/people', 'POST', { name: name.value });
-        if (c.status === 401) return refused();
-        if (c.status !== 200) return say(errorText(c.status, c.data), 'error');
-        say(`${c.data.name} was added.`, 'ok');
-        refreshChanges();
-        await renderPeople(box, c.data);
-      } finally {
-        add.disabled = false;
-      }
-    };
   }
 
   function refreshChanges(): void {
