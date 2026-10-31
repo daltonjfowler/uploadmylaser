@@ -902,6 +902,9 @@ function ungroup(): void {
   const i = resultIds.indexOf(p.id);
   // a pop-up, not a note: under a red bed error the note was easy to miss and Ungroup looked broken
   const say = (t: string) => { warn(t); render(); };
+  // without a phrase or a material the file is never checked, so "wait" would wait forever
+  if (!getPhrase()) return say('Ungroup works on the laser lines. Enter the class phrase first (top of the side panel).');
+  if (!materialId) return say('Ungroup works on the laser lines. Pick your material under Layers first.');
   if (pending || !result || i < 0) return say('Wait a moment for the file to be checked, then press Ungroup again.');
   if (result.unassigned?.some((u) => u.part === i)) return say('Choose what each colour does first (under Layers), then press Ungroup.');
   const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
@@ -2771,6 +2774,7 @@ async function run(): Promise<void> {
     drawnEdits = at;
     notes = [];
     remember(res, ids, sigs);
+    cutUnknownColours(res, ids);
     // say it once, where the student is looking; the button itself is in the Laser panel
     if (!hadOpen && res.openEngraveParts?.some((i) => !find(ids[i])?.closeGaps)) {
       warn('Some shapes are not closed, so they can’t be engraved. Press Weld them closed in the Laser panel.');
@@ -2789,6 +2793,36 @@ async function run(): Promise<void> {
   setBusy(false);
   ws.clearLive();
   render();
+}
+
+/**
+ * A colour the laser does not know (green, a CAD layer colour) starts as Cut through, so nothing waits
+ * grey for a choice and Ungroup, Trim and Send work straight away; Layers still changes it (Dalton
+ * 2026-10-30). Only colours nobody chose yet: Skip, or any choice, is kept. Photos cannot be cut.
+ * Not an Undo step of its own: it belongs to the import.
+ */
+function cutUnknownColours(res: ProcessResponse, ids: number[]): void {
+  const set = new Map<number, Set<string>>(); // part id -> colour keys set to Cut
+  for (const c of res.partColors ?? []) {
+    const p = find(ids[c.part]);
+    if (c.kind !== null || c.key.startsWith('photo:') || p?.source.kind !== 'file') continue;
+    if (colorNow(p.source, c.key, null) !== null) continue;
+    p.source.colors = { ...p.source.colors, [c.key]: 'cut' };
+    let keys = set.get(p.id);
+    if (!keys) set.set(p.id, keys = new Set());
+    keys.add(c.key);
+  }
+  if (!set.size) return;
+  recolourNow([...set.keys()], null, 'cut');
+  lastSnap = snap();
+  edits++;
+  save();
+  schedule();
+  const names = [...new Set([...set.values()].flatMap((k) => [...k]).map((k) => {
+    const hex = /#[0-9a-f]{6}$/i.exec(k)?.[0];
+    return hex ? colourName(hex.toLowerCase()) : k;
+  }))];
+  warn(`${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} set to Cut through. To engrave or mark instead, change it under Layers.`, '✓');
 }
 
 function askPhrase(): void {

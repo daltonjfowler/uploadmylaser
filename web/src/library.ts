@@ -50,8 +50,6 @@ export const LIBRARY: PathShape[] = [
   { id: 'gear', label: 'Gear', d: gear(12), closed: true },
   { id: 'burst', label: 'Starburst', d: star(12, 40), closed: true },
   { id: 'cloud', label: 'Cloud', d: 'M22 30 A16 16 0 0 1 50 16 A20 20 0 0 1 86 30 A15 15 0 0 1 88 60 H14 A15 15 0 0 1 22 30 Z', closed: true },
-  // One outline: pot and sprout share the stem's base, so cutting two loops split them into two pieces.
-  { id: 'plant', label: 'teachChat.app', d: 'M18 55 H47 V34 C38 36 12 30 8 8 C30 6 44 16 47 28 V24 C50 10 66 0 92 2 C90 22 70 32 53 30 V55 H82 V66 H76 L70 100 H30 L24 66 H18 Z', closed: true },
 
   // sports
   { id: 'basketball', label: 'Basketball', group: 'Sports', d: hole(50, 50, 50), closed: true,
@@ -73,7 +71,7 @@ export const LIBRARY: PathShape[] = [
   { id: 'callout', label: 'Callout box', group: 'Callouts', d: 'M0 0 H100 V60 H38 L16 82 L22 60 H0 Z', closed: true },
   { id: 'banner', label: 'Ribbon banner', group: 'Callouts', d: 'M0 10 H100 L90 30 L100 50 H0 L10 30 Z', closed: true },
 
-  // the uploadmy logos, ready to burn: tile = Cut, solid parts = Engrave, lines = Mark (Dalton 2026-10-30)
+  // the uploadmy and teachChat logos, ready to burn: tile = Cut, solid parts = Engrave, lines = Mark (Dalton 2026-10-30)
   ...logos(),
 ];
 
@@ -84,7 +82,8 @@ function rr(x: number, y: number, w: number, h: number, r: number): string {
 }
 
 /**
- * The four site icons (scripts/make-icons.mjs on each site) redrawn for the laser on the same 64 Ã— 64 grid.
+ * The four uploadmy site icons (scripts/make-icons.mjs on each site) and teachChat's sprout in a pot
+ * (teachchat.app's apple-touch-icon), redrawn for the laser on the same 64 × 64 grid.
  * Engraved shapes never overlap: engraving fills even-odd, so an overlap would come out as a hole.
  */
 function logos(): PathShape[] {
@@ -98,7 +97,7 @@ function logos(): PathShape[] {
     return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as Pt;
   }))} ${hole(cx, cy, 2)}`;
   const logo = (id: string, label: string, engrave: string, detail: string): PathShape =>
-    ({ id, label, group: 'uploadmy logos', d: tile, closed: true, engrave, detail });
+    ({ id, label, group: 'Logos', d: tile, closed: true, engrave, detail });
   return [
     logo('logo-laser', 'uploadmylaser',
       `${hat} ${eyes(30, 3.6)} ${spark(17, 53.5)} ${spark(47, 53)}`,
@@ -118,6 +117,11 @@ function logos(): PathShape[] {
       `${hat} ${eyes(30, 3.6)} ${rr(7, 45.5, 13, 7, 2.5)} M11 52.5 H16.5 L15.5 58.5 H10.5 Z ${rr(8.5, 58.5, 9.5, 3, 1)}`
       + ` ${rr(3.4, 46.6, 3.6, 4.8, 1)} ${rr(1.6, 48.2, 1.8, 1.6, 0.5)} ${saw(49, 53)}`,
       `${rr(14, 20, 36, 25, 7)} M27 38 Q32 42.5 37 38 M16 43 Q10.5 45 13.6 52 M48 43 Q53 43 52.5 45.5`),
+    logo('logo-teachchat', 'teachChat',
+      // two leaves and the soil mound (none touch); the stem joins them as a Mark line
+      'M31.5 23 Q21 23 15.5 11.5 Q27 9.5 31.5 23 Z M32.5 17 Q36 5.5 51 6 Q47 18.5 32.5 17 Z M20 38 Q20 27.5 32 27.5 Q44 27.5 44 38 Z',
+      // pot: rim band and tapered body; stem
+      `${rr(13, 38, 38, 7, 2)} M16.5 45 L20.5 59.5 H43.5 L47.5 45 M32 27.5 Q31 21 32.5 14`),
   ];
 }
 
@@ -126,7 +130,7 @@ export function lineD(a: Pt, b: Pt): string {
   return `M${f(a[0])} ${f(a[1])} L${f(b[0])} ${f(b[1])}`;
 }
 
-/** A smooth curve through the points (Catmull-Rom as cubic BÃ©ziers). */
+/** A smooth curve through the points (Catmull-Rom as cubic Béziers). */
 export function smoothD(pts: Pt[], closed: boolean): string {
   if (pts.length < 2) return '';
   if (pts.length === 2) return lineD(pts[0], pts[1]);
