@@ -2,8 +2,9 @@
 // browser (see pathSvg in shapes.ts), so the server treats them like any uploaded file.
 
 /** `detail` is inside lines (seams, panels), added as a second part in Mark so cutting the outline
- *  never cuts along them. */
-export interface PathShape { id: string; label: string; d: string; closed: boolean; detail?: string; group?: string }
+ *  never cuts along them. `engrave`: filled areas, added as an Engrave part; a shape with one always
+ *  cuts its outline (the logos). */
+export interface PathShape { id: string; label: string; d: string; closed: boolean; detail?: string; engrave?: string; group?: string }
 
 type Pt = [number, number];
 
@@ -71,14 +72,61 @@ export const LIBRARY: PathShape[] = [
   { id: 'bubble2', label: 'Thought bubble', group: 'Callouts', d: 'M25 20 A18 18 0 0 1 55 12 A18 18 0 0 1 85 25 A15 15 0 0 1 88 55 A18 18 0 0 1 60 68 A18 18 0 0 1 28 65 A15 15 0 0 1 12 40 A15 15 0 0 1 25 20 Z ' + hole(22, 82, 6) + ' ' + hole(10, 95, 4), closed: true },
   { id: 'callout', label: 'Callout box', group: 'Callouts', d: 'M0 0 H100 V60 H38 L16 82 L22 60 H0 Z', closed: true },
   { id: 'banner', label: 'Ribbon banner', group: 'Callouts', d: 'M0 10 H100 L90 30 L100 50 H0 L10 30 Z', closed: true },
+
+  // the uploadmy logos, ready to burn: tile = Cut, solid parts = Engrave, lines = Mark (Dalton 2026-10-30)
+  ...logos(),
 ];
+
+/** Rounded rectangle. */
+function rr(x: number, y: number, w: number, h: number, r: number): string {
+  return `M${f(x + r)} ${f(y)} H${f(x + w - r)} A${r} ${r} 0 0 1 ${f(x + w)} ${f(y + r)} V${f(y + h - r)} A${r} ${r} 0 0 1 ${f(x + w - r)} ${f(y + h)}`
+    + ` H${f(x + r)} A${r} ${r} 0 0 1 ${f(x)} ${f(y + h - r)} V${f(y + r)} A${r} ${r} 0 0 1 ${f(x + r)} ${f(y)} Z`;
+}
+
+/**
+ * The four site icons (scripts/make-icons.mjs on each site) redrawn for the laser on the same 64 Ã— 64 grid.
+ * Engraved shapes never overlap: engraving fills even-odd, so an overlap would come out as a hole.
+ */
+function logos(): PathShape[] {
+  const tile = rr(0, 0, 64, 64, 14);
+  const hat = 'M32 5 L41 15 H35 V20 H29 V15 H23 Z'; // the upload arrow on the robot's head
+  const eyes = (y: number, r: number) => `${hole(25, y, r)} ${hole(39, y, r)}`;
+  const spark = (cx: number, cy: number) => poly([[0, -3.5], [1.2, -1.2], [4, 0], [1.2, 1.2], [0, 3.5], [-1.2, 1.2], [-4, 0], [-1.2, -1.2]].map(([x, y]) => [cx + x, cy + y] as Pt));
+  const saw = (cx: number, cy: number) => `${poly(Array.from({ length: 24 }, (_, i) => {
+    const a = (i / 24) * Math.PI * 2;
+    const r = i % 2 ? 7.2 : 9.6;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as Pt;
+  }))} ${hole(cx, cy, 2)}`;
+  const logo = (id: string, label: string, engrave: string, detail: string): PathShape =>
+    ({ id, label, group: 'uploadmy logos', d: tile, closed: true, engrave, detail });
+  return [
+    logo('logo-laser', 'uploadmylaser',
+      `${hat} ${eyes(30, 3.6)} ${spark(17, 53.5)} ${spark(47, 53)}`,
+      `${rr(14, 20, 36, 25, 7)} M27 38 Q32 42.5 37 38 M25 30 Q20 42 17 50 M39 30 Q44 42 47 49.5`
+      + ' M7 52.2 L57 50.6 L57.2 58.6 L7.2 60 Z M23 56.5 Q30 56.3 37 56.4'),
+    logo('logo-model', 'uploadmymodel',
+      `M29 25 L34 25.4 L34 15.5 L40.5 15.8 L31.8 5.5 L23.2 15.2 L29 15.4 Z ${hole(21.5, 37.5, 2.4)} ${hole(31.5, 38.5, 2.4)}`,
+      // cube: front face, side face, top edges (broken where the arrow's stem stands in front)
+      'M12.5 27 L39 29.5 L39 56 L12.5 53.5 Z M39 29.5 L51 23.8 L51 50 L39 56 M12.5 27 L24.5 21.5 L29 21.89 M34 22.32 L51 23.8'
+      + ' M40 34 Q45 31.6 50.2 29 M40 38.6 Q45 36.2 50.2 33.6 M40 43.2 Q45 40.8 50.2 38.2 M40 47.8 Q45 45.4 50.2 42.8'
+      + ' M20.5 45 Q26.5 50 32.5 46.5'),
+    logo('logo-code', 'uploadmycode',
+      `${hat} ${eyes(33, 3.2)} ${[27, 34, 41].map((y) => `${rr(8, y, 6, 3, 1.2)} ${rr(50, y, 6, 3, 1.2)}`).join(' ')}`,
+      `${rr(14, 20, 36, 31, 6.5)} M24 41 Q32 48 40 41`),
+    logo('logo-cut', 'uploadmycut',
+      // drill: body, handle, battery, chuck, bit (touching, never overlapping); buzz saw with its arbor hole
+      `${hat} ${eyes(30, 3.6)} ${rr(7, 45.5, 13, 7, 2.5)} M11 52.5 H16.5 L15.5 58.5 H10.5 Z ${rr(8.5, 58.5, 9.5, 3, 1)}`
+      + ` ${rr(3.4, 46.6, 3.6, 4.8, 1)} ${rr(1.6, 48.2, 1.8, 1.6, 0.5)} ${saw(49, 53)}`,
+      `${rr(14, 20, 36, 25, 7)} M27 38 Q32 42.5 37 38 M16 43 Q10.5 45 13.6 52 M48 43 Q53 43 52.5 45.5`),
+  ];
+}
 
 /** A straight line between two points (mm). */
 export function lineD(a: Pt, b: Pt): string {
   return `M${f(a[0])} ${f(a[1])} L${f(b[0])} ${f(b[1])}`;
 }
 
-/** A smooth curve through the points (Catmull-Rom as cubic Béziers). */
+/** A smooth curve through the points (Catmull-Rom as cubic BÃ©ziers). */
 export function smoothD(pts: Pt[], closed: boolean): string {
   if (pts.length < 2) return '';
   if (pts.length === 2) return lineD(pts[0], pts[1]);

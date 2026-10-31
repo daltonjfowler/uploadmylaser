@@ -237,6 +237,7 @@ body.display #net { position: fixed; right: 12px; bottom: 8px; margin: 0; color:
 .libitem svg { width: 54px; height: 54px; overflow: visible; }
 .libitem svg .o { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: var(--ink); stroke-width: 3; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .libitem svg .dl { fill: none; stroke: #dc2626; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.libitem svg .en { fill: #2563eb; fill-rule: evenodd; stroke: none; }
 .libitem:hover { border-color: var(--sel); }
 .helpcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 .help table { border-collapse: collapse; width: 100%; font-size: .9rem; }

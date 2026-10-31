@@ -820,7 +820,7 @@ function renderLibrary(): void {
       const vb = pathBBox(sh.d);
       const svg = document.createElementNS(NS, 'svg');
       svg.setAttribute('viewBox', `${vb.x - 4} ${vb.y - 4} ${vb.w + 8} ${vb.h + 8}`);
-      for (const [d, cls] of [[sh.d, 'o'], [sh.detail ?? '', 'dl']] as const) {
+      for (const [d, cls] of [[sh.d, 'o'], [sh.engrave ?? '', 'en'], [sh.detail ?? '', 'dl']] as const) {
         if (!d) continue;
         const path = document.createElementNS(NS, 'path');
         path.setAttribute('d', d);
@@ -837,7 +837,10 @@ function renderLibrary(): void {
   }));
 }
 
-/** Add a library shape 40 mm on its long side. Inside lines come in as a Mark part, selected with it. */
+/**
+ * Add a library shape 40 mm on its long side. Inside lines come in as a Mark part and filled areas (the
+ * logos) as an Engrave part, selected with it. A shape with an Engrave layer always cuts its outline.
+ */
 function insertLibrary(sh: PathShape): void {
   $('libraryDlg').hidden = true;
   const vb = pathBBox(sh.d);
@@ -845,20 +848,26 @@ function insertLibrary(sh: PathShape): void {
   const spot = newSpot();
   const x0 = spot.xMm - vb.w * k;
   const y0 = spot.yMm;
-  const outline: Source = { kind: 'path', name: sh.label, d: sh.d, vb, closed: sh.closed, wMm: round(vb.w * k), hMm: round(vb.h * k), op: color };
-  if (!sh.detail) return addPart(outline, spot);
-  if (parts.length + 2 > MAX_PARTS) return addPart(outline, spot);
-  const dvb = pathBBox(sh.detail);
+  const outline: Source = { kind: 'path', name: sh.label, d: sh.d, vb, closed: sh.closed, wMm: round(vb.w * k), hMm: round(vb.h * k), op: sh.engrave ? 'cut' : color };
+  const layers: [string, OpKind, string][] = [];
+  if (sh.engrave) layers.push([sh.engrave, 'engrave', 'filled parts']);
+  if (sh.detail) layers.push([sh.detail, 'score', 'lines']);
+  if (!layers.length || parts.length + 1 + layers.length > MAX_PARTS) return addPart(outline, spot);
   const a: DesignPart = { id: nextId++, source: outline, ...spot, scale: 1, rotateDeg: 0 };
-  const b: DesignPart = {
-    id: nextId++,
-    source: { kind: 'path', name: `${sh.label} lines`, d: sh.detail, vb: dvb, closed: false, wMm: round(dvb.w * k), hMm: round(dvb.h * k), op: 'score' },
-    xMm: round(x0 + (dvb.x + dvb.w - vb.x) * k), yMm: round(y0 + (dvb.y - vb.y) * k), scale: 1, rotateDeg: 0,
-  };
-  parts.push(a, b);
-  notes = [`${sh.label}: the inside lines are a separate Mark part, so cutting the outline won’t cut along them. Both are selected, so they move together.`];
+  const more: DesignPart[] = layers.map(([d, op, what]) => {
+    const lvb = pathBBox(d);
+    return {
+      id: nextId++,
+      source: { kind: 'path', name: `${sh.label} ${what}`, d, vb: lvb, closed: op === 'engrave', wMm: round(lvb.w * k), hMm: round(lvb.h * k), op },
+      xMm: round(x0 + (lvb.x + lvb.w - vb.x) * k), yMm: round(y0 + (lvb.y - vb.y) * k), scale: 1, rotateDeg: 0,
+    };
+  });
+  parts.push(a, ...more);
+  notes = [sh.engrave
+    ? `${sh.label}: the tile is Cut through, the solid parts Engrave and the lines Mark, as three parts that move together. Cut always runs last.`
+    : `${sh.label}: the inside lines are a separate Mark part, so cutting the outline won’t cut along them. Both are selected, so they move together.`];
   changed();
-  setGroup([a.id, b.id]);
+  setGroup([a.id, ...more.map((p) => p.id)]);
 }
 
 // ---------- help ----------
