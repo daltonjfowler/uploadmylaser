@@ -23,6 +23,7 @@ import { constantTimeEquals } from './constant-time.ts';
 import { validateTestCard } from './testcard.ts';
 import { canonicalRedirect, withSecurityHeaders } from './headers.ts';
 import { HttpError, json } from './http.ts';
+import { CONTAINER_TIMEOUT_MS, idleCapAction } from './idle-cap.ts';
 import { checkIpLimit } from './ip-limit.ts';
 import { cacheStore, checkLockout, lockoutSubject, recordRight, recordWrong, type LockoutStore } from './lockout.ts';
 import { recordWrongFromIp } from './wrong-ip.ts';
@@ -59,7 +60,6 @@ interface Env {
 
 const KV_MATERIALS = 'materials';
 const KV_MACHINE = 'machine';
-const CONTAINER_TIMEOUT_MS = 35_000; // the container stops a job at 30 s (runner.py) and says why; this is the backstop
 const TEACHER_REJECT_DELAY_MS = 300;
 const MAX_TEACHER_BYTES = 4 * 1024;
 const MAX_MATERIALS_BYTES = 64 * 1024;
@@ -71,7 +71,37 @@ const BUSY = 'The laser processor is starting up or busy. Wait a few seconds and
 // clock, so counting junk traffic on this object would keep it awake and billing.
 export class LaserContainer extends Container {
   override defaultPort = 8080;
-  override sleepAfter = '5m'; // same as uploadmycode: memory bills while awake, and a cold start is a few seconds
+  override sleepAfter = '5m'; // SLEEP_AFTER_MS; same as uploadmycode: memory bills while awake, cold start is a few seconds
+  // Starts at "now", so a Durable Object restart never stops a container that is in use.
+  #lastRequestAt = Date.now();
+  #stopSentAt: number | null = null;
+
+  override async fetch(request: Request): Promise<Response> {
+    this.#lastRequestAt = Date.now();
+    this.#stopSentAt = null;
+    return super.fetch(request);
+  }
+
+  // The library's alarm loop runs at least every 3 minutes while the container is up. See
+  // src/idle-cap.ts for why the sleep clock alone is not enough.
+  override async alarm(alarmProps?: AlarmInvocationInfo): Promise<void> {
+    const now = Date.now();
+    const action = idleCapAction(now, this.#lastRequestAt, this.ctx.container?.running ?? false, this.#stopSentAt);
+    if (action !== 'none') {
+      console.log(JSON.stringify({ message: `idle cap: ${action} container`, idleMs: now - this.#lastRequestAt }));
+      try {
+        if (action === 'stop') {
+          this.#stopSentAt = now;
+          await this.stop();
+        } else {
+          await this.destroy();
+        }
+      } catch (e) {
+        console.error(JSON.stringify({ message: `idle cap: ${action} failed`, error: String(e) }));
+      }
+    }
+    return super.alarm(alarmProps);
+  }
 
   override onError(error: unknown): unknown {
     console.error(JSON.stringify({ message: 'container error', error: String(error) }));

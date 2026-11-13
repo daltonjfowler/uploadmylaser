@@ -147,4 +147,6 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8080
 # One uvicorn worker: it hands each job to a worker process with a time limit (app/runner.py).
 # max_instances in wrangler.jsonc is the scaling knob.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-keep-alive", "30"]
+# --timeout-graceful-shutdown: on SIGTERM (sleep, idle cap) exit within 5 s even if a request is stuck. Without it
+# uvicorn waits for open requests forever and the container keeps billing (src/idle-cap.ts).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-keep-alive", "30", "--timeout-graceful-shutdown", "5"]
