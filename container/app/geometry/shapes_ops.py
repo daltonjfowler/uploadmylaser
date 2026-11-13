@@ -46,8 +46,34 @@ def _ring(coords) -> list[Pt]:
     return [(float(x), float(y)) for x, y in coords]
 
 
+def join_touching(items: list[Item]) -> list[Item]:
+    """What AutoCAD's OVERKILL and JOIN do, before a fill or a weld: per colour and fill group, drop exact
+    repeats and chain open lines whose ends touch (order.JOIN_TOL_MM). A chain that comes back to its start
+    is a closed shape. Exploded text (TXTEXP) arrives as loose pieces and repeats; unjoined, its letters
+    could not be filled, and a repeated outline cancelled itself out in the even-odd fill. Nothing moves:
+    only the order and direction of points change, and no gap is bridged (that is close_gaps)."""
+    from .order import JOIN_TOL_MM, join_paths
+
+    groups: dict[tuple[str, object, object], list[Item]] = {}
+    for it in items:
+        groups.setdefault((it.key, it.kind, it.group), []).append(it)
+    out: list[Item] = []
+    for (key, kind, group), its in groups.items():
+        if len(its) == 1:
+            out += its
+            continue
+        for r in join_paths([it.pts for it in its]):
+            closed = len(r) >= 4 and math.dist(r[0], r[-1]) <= JOIN_TOL_MM
+            if closed and r[-1] is not r[0]:
+                r = r[:-1] + [r[0]]
+            out.append(Item(key, kind, r, closed, group))
+    return out
+
+
 def weld(items: list[Item]) -> list[Item]:
-    """Closed shapes of the same colour and job become their merged outline. Open lines stay as they are."""
+    """Closed shapes of the same colour and job become their merged outline. Open lines stay as they are.
+    Touching loose lines are joined first, so exploded text welds without OVERKILL."""
+    items = join_touching(items)
     out = [it for it in items if not it.closed]
     groups: dict[tuple[str, object], list[Item]] = {}
     for it in items:

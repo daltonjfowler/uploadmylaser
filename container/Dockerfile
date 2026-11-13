@@ -24,10 +24,12 @@ RUN cd /tmp && for m in https://ftpmirror.gnu.org https://mirrors.kernel.org/gnu
 FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 # Fonts for the Text tool (ids in app/geometry/text_import.py and shared/contracts.ts TEXT_FONTS).
-# DejaVu comes from Debian. The rest are OFL/Apache fonts from github.com/google/fonts, pinned to one
-# commit and checked against sha256 below. To update: change GF_COMMIT and the hashes together.
+# DejaVu and Liberation come from Debian (Liberation stands in for Arial, Times New Roman and Courier New
+# in AutoCAD text: STAND_INS in app/geometry/dxf_import.py). The rest are OFL/Apache fonts from
+# github.com/google/fonts, pinned to one commit and checked against sha256 below. To update: change
+# GF_COMMIT and the hashes together.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fonts-dejavu-core \
+ && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 ARG GF=https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a
 ADD ${GF}/ofl/anton/Anton-Regular.ttf \

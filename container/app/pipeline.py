@@ -9,7 +9,7 @@ from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, I
 from .geometry.hatch import hatch
 from .geometry.order import join_paths, nearest_neighbour, order_cut_groups
 from .geometry.photo_import import PHOTO_KEY
-from .geometry.shapes_ops import close_gaps, outline, weld
+from .geometry.shapes_ops import close_gaps, join_touching, outline, weld
 from .geometry.transform import bbox, place
 from .models import ContainerJob, FilePart, OpKind, OpSettings, Part, PartColor, PartPaths, PreviewLayer, ProcessResponse
 from .ruida.encoder import EncLayer, clamp_settings, encode_job, frame_layers, machine_converter
@@ -220,11 +220,15 @@ def process(job: ContainerJob) -> ProcessResponse:
         s = clamp_settings(apply_power_choice(mat.ops[kind], req.power_choice.get(kind)), m)
         if kind == "engrave":
             photo = [i for _, i in group if i.key == PHOTO_KEY]  # already the fill: rows of dots
-            rest = [i for _, i in group if i.key != PHOTO_KEY]
+            # loose touching lines become shapes and repeats go (exploded AutoCAD text), part by part
+            # (every part has its own fill groups, so a joined line still belongs to exactly one part)
+            part_of = {i.group: pi for pi, i in group}
+            joined = [(part_of[i.group], i) for i in join_touching([i for _, i in group if i.key != PHOTO_KEY])]
+            rest = [i for _, i in joined]
             closed = [i for i in rest if i.closed]
             if len(closed) < len(rest):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
-                res.open_engrave_parts = sorted({pi for pi, i in group if i.key != PHOTO_KEY and not i.closed})
+                res.open_engrave_parts = sorted({pi for pi, i in joined if not i.closed})
             lines = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed], cur)
             paths = lines + ([] if off_bed else [i.pts for i in photo])
             try:  # scan lines get their own budget (the photo's dots were counted on import)

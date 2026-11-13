@@ -1,4 +1,5 @@
-"""DXF → Items using ezdxf. Handles LINE, (LW)POLYLINE, ARC, CIRCLE, ELLIPSE, SPLINE, SOLID and INSERT blocks.
+"""DXF → Items using ezdxf. Handles LINE, (LW)POLYLINE, ARC, CIRCLE, ELLIPSE, SPLINE, SOLID and INSERT blocks,
+and TEXT, MTEXT and ATTRIB as letter outlines (so students no longer need TXTEXP + OVERKILL first).
 
 A DXF that has nothing we can laser raises ImportProblem with what to do in AutoCAD, so a student never gets
 a silent blank part. Colours are resolved the way AutoCAD draws them: BYLAYER, BYBLOCK, layer 0 inside a
@@ -14,6 +15,8 @@ from typing import Optional
 
 from ezdxf import colors as aci_colors
 from ezdxf import disassemble, recover
+from ezdxf.addons import MTextExplode, text2path
+from ezdxf.fonts.fonts import font_manager as FONT_MANAGER
 from ezdxf.document import Drawing
 from ezdxf.entities import DXFEntity, Insert
 from ezdxf.lldxf.tagger import binary_tags_loader
@@ -47,18 +50,35 @@ BINARY_SENTINEL = b"AutoCAD Binary DXF"
 BYBLOCK, BYLAYER = 0, 256
 
 # What we skip, and what to tell the student. Keys are ezdxf dxftype() names.
-TEXT = {"TEXT", "MTEXT", "ATTRIB", "ATTDEF"}
+# Text becomes letter outlines (_text_pieces); "text" is only skipped when that fails.
+TEXT = {"TEXT", "MTEXT", "ATTRIB"}
 NOTES = {"DIMENSION", "ARC_DIMENSION", "LARGE_RADIAL_DIMENSION", "LEADER", "MLEADER", "MULTILEADER",
          "TOLERANCE", "ACAD_TABLE"}
 SOLID_3D = {"3DSOLID", "REGION", "BODY", "SURFACE", "EXTRUDEDSURFACE", "LOFTEDSURFACE", "REVOLVEDSURFACE",
             "SWEPTSURFACE", "PLANESURFACE", "NURBSURFACE"}
 PICTURES = {"IMAGE", "WIPEOUT", "OLE2FRAME", "OLEFRAME", "PDFUNDERLAY", "DWFUNDERLAY", "DGNUNDERLAY"}
 CONSTRUCTION = {"XLINE", "RAY"}
-IGNORED = {"POINT", "VIEWPORT"}
+# ATTDEF is a block's attribute template: AutoCAD shows the ATTRIB made from it instead.
+IGNORED = {"POINT", "VIEWPORT", "ATTDEF"}
+
+# AutoCAD's own fonts are not in the container. Each text style gets the closest font that is: Liberation
+# fonts have the same letter widths as Arial, Times New Roman and Courier New, so text keeps its size.
+# Everything else, AutoCAD's SHX fonts (txt, simplex, romans...) included, gets DejaVu Sans.
+STAND_INS = (
+    (("arial", "helvetica", "swiss", "calibri", "segoe", "verdana", "tahoma", "century gothic", "liberation sans"),
+     "LiberationSans", ("-Regular", "-Bold", "-Italic", "-BoldItalic")),
+    (("times", "georgia", "cambria", "garamond", "book antiqua", "liberation serif"),
+     "LiberationSerif", ("-Regular", "-Bold", "-Italic", "-BoldItalic")),
+    (("courier", "consola", "lucida console", "liberation mono"),
+     "LiberationMono", ("-Regular", "-Bold", "-Italic", "-BoldItalic")),
+)
+LAST_RESORT = ("DejaVuSans", ("", "-Bold", "", "-Bold"))  # fonts-dejavu-core has no oblique
+TEXT_WARNING = ("Text in the DXF was turned into letter outlines with the closest font we have (AutoCAD's own "
+                "fonts are not here), so check the letters in the preview.")
 
 ADVICE = {
     "hidden": "Its lines are on layers that are turned off or frozen. In AutoCAD, turn those layers on and thaw them, then save the DXF again.",
-    "text": "Text can't be cut from a DXF. In AutoCAD, use TXTEXP (Express Tools) to turn it into lines, or use the Text tool here.",
+    "text": "We couldn't read the text in this DXF. In AutoCAD, use TXTEXP (Express Tools) to turn it into lines, or use the Text tool here.",
     "hatch": "Hatches (fills) are skipped. Draw the outline with a closed polyline instead. Make it blue to engrave it.",
     "solid3d": "3D solids and regions can't be read. In AutoCAD, EXPLODE regions into lines, or use FLATSHOT on a 3D model, then save again.",
     "picture": "Pictures inside a DXF can't be lasered. Trace them with lines, or open the picture as an SVG instead.",
@@ -67,7 +87,7 @@ ADVICE = {
 }
 WARN = {
     "hidden": "Lines on layers that are turned off or frozen were skipped.",
-    "text": "Text in the DXF was skipped. Explode it to lines first (TXTEXP in AutoCAD), or use the Text tool.",
+    "text": "Some text in the DXF could not be read and was skipped. Explode it to lines first (TXTEXP in AutoCAD), or use the Text tool.",
     "hatch": "Hatches (fills) in the DXF were skipped. Their outlines are used if they are drawn as lines too.",
     "solid3d": "3D solids and regions in the DXF were skipped. EXPLODE them into lines in AutoCAD first.",
     "picture": "Pictures in the DXF were skipped.",
@@ -225,6 +245,8 @@ def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budg
     for r in WARN:
         if r in skipped:
             warnings.add(WARN[r])
+    if "text_outlines" in skipped:
+        warnings.add(TEXT_WARNING)
 
     xs = [x for _, _, pts, _ in raw for x, _ in pts]
     ys = [y for _, _, pts, _ in raw for _, y in pts]
@@ -249,6 +271,34 @@ def import_dxf(data: bytes, warnings: ImportWarnings, tol_mm: float = 0.05, budg
 def _collect(doc: Drawing, entities: Iterable[DXFEntity], scale: float, tol_mm: float, budget: PointBudget,
              skipped: set[str]) -> list[tuple[str, Optional[str], list[Pt], bool]]:
     raw: list[tuple[str, Optional[str], list[Pt], bool]] = []
+    fitted: set[str] = set()  # text styles already pointed at a font we have
+
+    def add(path, vertices, style: Style, m: Optional[Matrix44]) -> None:
+        if path is not None:
+            path = path if m is None else path.transform(m)
+            box = BoundingBox(path.control_vertices())
+            size = max(box.size.x, box.size.y) if box.has_data else 0.0
+            if not math.isfinite(size):
+                raise ValueError("DXF coordinates are not finite")
+            vs = list(path.flattening(distance=max(tol_mm / scale, size * RELATIVE_TOLERANCE)))
+        else:
+            vs = list(vertices) if m is None else list(m.transform_vertices(vertices))
+        budget.take(len(vs))
+        if len(vs) < 2:
+            return
+        pts = [(v.x * scale, v.y * scale) for v in vs]
+        if not all(math.isfinite(c) for p in pts for c in p):
+            raise ValueError("DXF coordinates are not finite")
+        closed = abs(pts[0][0] - pts[-1][0]) < 1e-6 and abs(pts[0][1] - pts[-1][1]) < 1e-6
+        if closed:
+            pts[-1] = pts[0]  # exact, so ordering/hatching treat it as closed
+        key, op = _classify(style)
+        raw.append((key, op, pts, closed))
+
+    def add_primitives(ent: DXFEntity, style: Style, m: Optional[Matrix44]) -> None:
+        for prim in disassemble.to_primitives([ent]):
+            add(prim.path, None if prim.path is not None else prim.vertices(), style, m)
+
     for ent, style, m in _decompose(doc, entities, [0]):
         kind = ent.dxftype()
         reason = _skip_reason(kind)
@@ -258,28 +308,79 @@ def _collect(doc: Drawing, entities: Iterable[DXFEntity], scale: float, tol_mm: 
             if reason is None:
                 skipped.add("hidden")
             continue
+        if kind in TEXT:
+            try:
+                pieces = list(_text_pieces(doc, ent, style, fitted))
+            except Exception:  # a font or an MTEXT code ezdxf can't handle: skip that text and say so
+                skipped.add("text")
+                continue
+            for sub, sub_style, path in pieces:
+                if path is not None:
+                    add(path, None, sub_style, m)
+                else:
+                    add_primitives(sub, sub_style, m)
+            if pieces:
+                skipped.add("text_outlines")
+            continue
         if reason is not None:
             skipped.add(reason)
             continue
-        for prim in disassemble.to_primitives([ent]):
-            if prim.path is not None:
-                path = prim.path if m is None else prim.path.transform(m)
-                box = BoundingBox(path.control_vertices())
-                size = max(box.size.x, box.size.y) if box.has_data else 0.0
-                if not math.isfinite(size):
-                    raise ValueError("DXF coordinates are not finite")
-                vs = list(path.flattening(distance=max(tol_mm / scale, size * RELATIVE_TOLERANCE)))
-            else:
-                vs = list(prim.vertices()) if m is None else list(m.transform_vertices(prim.vertices()))
-            budget.take(len(vs))
-            if len(vs) < 2:
-                continue
-            pts = [(v.x * scale, v.y * scale) for v in vs]
-            if not all(math.isfinite(c) for p in pts for c in p):
-                raise ValueError("DXF coordinates are not finite")
-            closed = abs(pts[0][0] - pts[-1][0]) < 1e-6 and abs(pts[0][1] - pts[-1][1]) < 1e-6
-            if closed:
-                pts[-1] = pts[0]  # exact, so ordering/hatching treat it as closed
-            key, op = _classify(style)
-            raw.append((key, op, pts, closed))
+        add_primitives(ent, style, m)
     return raw
+
+
+def _fit_font(doc: Drawing, style_name: str, fitted: set[str]) -> None:
+    """Point a text style at the closest font we have (STAND_INS), once per style. The document is only
+    this upload's copy, so changing its styles changes nothing anywhere else."""
+    if style_name in fitted or style_name not in doc.styles:
+        return
+    fitted.add(style_name)
+    style = doc.styles.get(style_name)
+    family, italic, bold = style.get_extended_font_data() if style.has_extended_font_data else ("", False, False)
+    file = (style.dxf.get("font") or "").strip()
+    stem = file.rsplit(".", 1)[0].lower()
+    if not family and file.lower().endswith((".ttf", ".otf", ".ttc")) and FONT_MANAGER.has_font(file):
+        return  # the real font is here: use it
+    name = (family or stem).lower()
+    # Windows file names: arialbd = bold, ariali = italic, arialbi / timesbi = both, consolaz = both
+    bold = bold or stem.endswith(("bd", "bi", "z")) or "bold" in name
+    italic = italic or (stem.endswith(("i", "z")) and not stem.endswith("ui")) or "italic" in name or "oblique" in name
+    pick = 2 * italic + bold
+    choice = None
+    for words, base, styles in STAND_INS:
+        if any(w in name for w in words):
+            choice = f"{base}{styles[pick]}.ttf"
+            break
+    if choice is None or not FONT_MANAGER.has_font(choice):
+        base, styles = LAST_RESORT
+        choice = f"{base}{styles[pick]}.ttf"
+    if FONT_MANAGER.has_font(choice):
+        if style.has_extended_font_data:
+            style.discard_extended_font_data()
+        style.dxf.font = choice
+    # else: ezdxf falls back to its own default font
+
+
+def _text_pieces(doc: Drawing, ent: DXFEntity, style: Style, fitted: set[str]):
+    """(entity, style, path) for every letter outline of a TEXT, ATTRIB or MTEXT; path None = draw the entity
+    itself (an MTEXT's underline or fraction line). MTEXT is first broken into one TEXT per run of letters,
+    in a scratch block of this upload's own copy of the drawing."""
+    kind = ent.dxftype()
+    if kind == "ATTRIB" and ent.is_invisible:
+        return
+    if kind == "MTEXT":
+        scratch = doc.blocks.new_anonymous_block()
+        with MTextExplode(scratch, doc) as xpl:
+            xpl.explode(ent, destroy=False)
+        for sub in scratch:
+            sub_style = _style(doc, sub, style)
+            if sub.dxftype() == "TEXT":
+                yield from _text_pieces(doc, sub, sub_style, fitted)
+            elif sub.dxftype() in ("LINE", "LWPOLYLINE"):
+                yield sub, sub_style, None
+        return
+    if not (ent.dxf.get("text") or "").strip():
+        return
+    _fit_font(doc, ent.dxf.get("style", "Standard"), fitted)
+    for path in text2path.make_paths_from_entity(ent):
+        yield ent, style, path

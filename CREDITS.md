@@ -38,6 +38,8 @@ only: no code from them is copied here.
 
 ## Fonts
 
+- **Liberation Sans / Serif / Mono** (SIL OFL 1.1): <https://github.com/liberationfonts>, installed in the
+  container from Debian, for text in DXF files drawn in Arial, Times New Roman or Courier New.
 - **DejaVu Sans / Serif** (Bitstream Vera license): <https://dejavu-fonts.github.io>, installed in the
   container from Debian.
 - **Anton, Bungee, Pacifico, Allerta Stencil** (SIL OFL 1.1) and **Permanent Marker** (Apache 2.0),

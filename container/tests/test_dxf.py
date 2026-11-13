@@ -217,11 +217,6 @@ def test_dimensions_are_notes_not_cuts():
 
 # ---------- nothing to laser: say what to do, never a blank part ----------
 
-def _text(m):
-    m.add_text("HELLO")
-    m.add_mtext("WORLD")
-
-
 def _hatch(m):
     m.add_hatch(color=5).paths.add_polyline_path([(0, 0), (10, 0), (10, 10)])
 
@@ -233,7 +228,6 @@ def _frozen(m):
 
 @pytest.mark.parametrize("draw, advice", [
     (lambda m: None, "draw on the Model tab"),
-    (_text, "TXTEXP"),
     (_hatch, "closed polyline"),
     (lambda m: m.add_xline((0, 0), (1, 1)), "XLINE"),
     (_frozen, "turn those layers on"),
@@ -358,3 +352,80 @@ def test_scaled_up_circles_stay_round():
     cy = (max(y for _, y in pts) + min(y for _, y in pts)) / 2
     worst = max(40 - math.hypot((a[0] + b[0]) / 2 - cx, (a[1] + b[1]) / 2 - cy) for a, b in zip(pts, pts[1:]))
     assert worst < 0.06, worst
+
+
+# ---------- AutoCAD text (Dalton 2026-11-12: it engraved weird unless TXTEXP + OVERKILL + GROUP) ----------
+
+def test_text_and_mtext_become_closed_letter_outlines():
+    doc = new()
+    m = doc.modelspace()
+    m.add_text("HELLO", height=10, dxfattribs={"color": 5}).set_placement((0, 0))
+    m.add_mtext(r"WORLD\P{\fArial|b1;Bold}", dxfattribs={"char_height": 5, "color": 5}).set_location((0, 40))
+    its, w = items(doc)
+    assert len(its) >= 10 and all(it.closed for it in its)
+    assert kinds(its) == [("dxf:0|#0000ff", "engrave")]
+    assert any("letter outlines" in x for x in w)
+    width, height = size(its)
+    assert 40 < width < 80 and 40 < height < 60, (width, height)
+
+
+def test_text_engraves_filled_with_no_open_line_warning():
+    doc = new()
+    doc.modelspace().add_text("OK", height=20, dxfattribs={"color": 5}).set_placement((0, 0))
+    res = run(dxf_bytes(doc))
+    assert res.errors == [] and res.rd
+    assert res.open_engrave_parts == []
+    assert not any("Open lines" in x for x in res.warnings)
+
+
+def test_text_in_a_block_and_its_attribute_follow_the_block():
+    doc = new()
+    blk = doc.blocks.new("TAG")
+    blk.add_text("A", height=10).set_placement((0, 0))
+    blk.add_attdef("NAME", (0, -20), dxfattribs={"height": 10})
+    ref = doc.modelspace().add_blockref("TAG", (100, 0), dxfattribs={"xscale": 2, "yscale": 2})
+    ref.add_auto_attribs({"NAME": "B"})
+    its, _ = items(doc)
+    xs = [x for it in its for x, _ in it.pts]
+    assert min(xs) >= 99 and its and all(it.closed for it in its)
+    assert size(its)[1] > 40  # "A" over "B", both doubled; the ATTDEF template itself is not drawn
+
+
+def _exploded_square(m, x0, color=5):
+    """What TXTEXP leaves: loose LINEs per outline, some drawn twice (OVERKILL removes those)."""
+    pts = [(x0, 0), (x0 + 10, 0), (x0 + 10, 10), (x0, 10)]
+    for i in range(4):
+        m.add_line(pts[i], pts[(i + 1) % 4], dxfattribs={"color": color})
+    m.add_line(pts[0], pts[1], dxfattribs={"color": color})  # a repeat
+
+
+def test_loose_touching_lines_engrave_without_overkill():
+    doc = new()
+    m = doc.modelspace()
+    _exploded_square(m, 0)
+    _exploded_square(m, 20)
+    res = run(dxf_bytes(doc))
+    assert res.errors == [] and res.rd
+    assert res.open_engrave_parts == [] and not any("Open lines" in x for x in res.warnings)
+    shown = [p for layer in res.preview if layer.kind == "engrave" for p in layer.paths]
+    assert len(shown) == 2  # two filled squares, the repeat gone
+
+
+def test_a_repeated_outline_does_not_cancel_its_own_fill():
+    doc = new()
+    m = doc.modelspace()
+    for _ in range(2):  # the same closed polyline twice: even-odd made it hollow (nothing engraved)
+        m.add_lwpolyline([(0, 0), (20, 0), (20, 20), (0, 20)], close=True, dxfattribs={"color": 5})
+    res = run(dxf_bytes(doc))
+    assert res.errors == [] and res.rd
+    assert res.estimate_s and res.estimate_s > 1
+
+
+def test_weld_joins_loose_lines_first():
+    from app.geometry import Item
+    from app.geometry.shapes_ops import weld
+    a = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    b = [(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)]
+    loose = [Item("k", "engrave", [p[i], p[(i + 1) % 4]], False, 0) for p in (a, b) for i in range(4)]
+    out = weld(loose)
+    assert len(out) == 2 and all(it.closed for it in out)  # eight loose lines, two welded squares

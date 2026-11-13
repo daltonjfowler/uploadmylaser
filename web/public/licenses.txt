@@ -626,6 +626,9 @@ Apache License
 DejaVu fonts (in the processing container, from Debian): Bitstream Vera and Arev licences,
 https://dejavu-fonts.github.io/License.html
 
+Liberation fonts (in the processing container, from Debian, for text in DXF files): SIL Open Font
+License 1.1, https://github.com/liberationfonts/liberation-fonts/blob/main/LICENSE
+
 
 ==============================================================================
 The processing container also uses FastAPI, Pydantic, svgelements, ezdxf, fontTools (MIT),
