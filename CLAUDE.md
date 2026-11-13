@@ -16,7 +16,7 @@ anything not marked verified there as a guess.
   clears; Cache API, falls open. No per-IP penalty, so a student cannot lock the teacher or the class out.
 - Teacher accounts (Dalton 2026-10-30): `src/teachers.ts` (server) and `web/src/teacher-account.ts` + `.css`
   (teacher page) are the SAME files on all four uploadmy sites: change one, copy to all four. Each teacher picks
-  their own password (start code first); accounts live in the shared `TEACHERS_KV` namespace, sessions are signed
+  their own password (start code first); only Dalton's account (`ACCOUNT_MANAGERS` in `src/teachers.ts`, plus the emergency shared key) may add or remove teachers or make start codes (Dalton 2026-11-13); accounts live in the shared `TEACHERS_KV` namespace, sessions are signed
   with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) secrets
   were deleted on 2026-11-12 (Dalton); sign-in is accounts only. To get in with no working account, put a
   `TEACHER_KEY` secret back for a moment, sign in with it as "Shared key", fix the account, then delete it again. Teacher changes are logged with the name (`logChange`, "Recent changes").

@@ -185,6 +185,8 @@ button.toplink { background: transparent; font: inherit; font-size: .9rem; curso
 .titlebar .themebtn { background: var(--btn); color: var(--ink); }
 .pagehead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .pagehead .themebtn { padding: 5px 10px; }
+.pagehead .headbtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pagehead .toplink { white-space: nowrap; }
 .pagehead h1 { display: inline-flex; align-items: center; gap: 10px; }
 .pagehead .logo { border-radius: 15px; }
 @media (max-width: 640px) { .pagehead .logo { width: 42px; height: 42px; border-radius: 9px; } }
