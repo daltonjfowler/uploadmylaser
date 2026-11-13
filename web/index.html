@@ -71,7 +71,7 @@
       <button id="mirror" data-hint="Mirror the selected parts left-right. Right-click for up-down.">⇋ Mirror</button>
       <button id="align" data-hint="Line up the selected parts, or space them evenly.">☰ Align</button>
       <button id="group" data-hint="Group: tie the selected parts together, so clicking one selects and moves them all. (Drag a box on the bed, or Shift+click, to select several.)">▣ Group</button>
-      <button id="ungroup" data-hint="Ungroup: untie a group, or split the selected file into its separate shapes, to move or delete each one.">⧉ Ungroup</button>
+      <button id="ungroup" data-hint="Ungroup: untie a group, or split the selected file one layer at a time (a frame comes off, each thing keeps what is inside it). Press again to go deeper. Right-click for Ungroup all the way.">⧉ Ungroup</button>
       <button id="zoomBed" data-hint="Show the whole laser bed.">Whole bed</button>
       <button id="zoomDesign" data-hint="Zoom to your design.">My design</button>
     </div>
@@ -300,7 +300,7 @@
             <li><b>Photo (beta)</b>: Import a PNG or JPG. Start small: photos take a while to engrave.</li>
             <li><b>Image trace</b>: Import a PNG or JPG and pick <b>Trace to outlines</b>. Threshold, Detail, Smooth and Clean up change the outlines; download them as SVG or DXF too.</li>
             <li>Type your board's size under <b>My material</b> to see it on the bed.</li>
-            <li><b>Group</b> ties parts together. <b>Ungroup</b> unties them, or splits a file into its separate shapes.</li>
+            <li><b>Group</b> ties parts together. <b>Ungroup</b> unties them, or splits a file one layer at a time: a frame comes off, and each thing inside keeps what is inside it (a game tile keeps its picture). Ungroup a piece again to go deeper. <b>Ungroup all the way</b> (right-click or Arrange menu) splits every shape at once.</li>
             <li><b>Hide</b> on a colour only hides it on the screen. Hidden lines still run on the laser.</li>
             <li>No laser here? <b>Export for teacher</b> saves one file with your design and the laser file.</li>
             <li>Text inside an SVG must be converted to paths first, or use the Text tool.</li>

@@ -103,8 +103,14 @@ function loopOf(lines: Line[]): Pt[] | null {
   return pts;
 }
 
+/** How far Ungroup goes. 'level' (the Ungroup button, Dalton 2026-11-12): peel one layer, like opening a box.
+ *  Things side by side each become a piece with everything inside them; one outline around everything
+ *  (a board game's frame) splits into the frame and each thing inside it, again with what is inside those.
+ *  Press Ungroup again on a piece to go one layer deeper. 'all': every shape on its own at once. */
+export type UngroupDepth = 'level' | 'all';
+
 /** The pieces of one part, largest first. */
-export function splitPieces(lines: Line[]): Piece[] {
+export function splitPieces(lines: Line[], depth: UngroupDepth = 'all'): Piece[] {
   const shapes: Shape[] = [];
   const open: Line[] = [];
   for (const l of lines) {
@@ -133,10 +139,60 @@ export function splitPieces(lines: Line[]): Piece[] {
       }
     }
   });
-  const top = (s: Shape): Shape => { let t = s; while (owner.has(t)) t = owner.get(t)!; return t; };
-  const pieces = new Map<Shape, Line[]>();
-  for (const s of shapes) { const t = top(s); pieces.set(t, [...(pieces.get(t) ?? []), ...s.lines]); }
-  return [...pieces.values()].map((ls) => ({ lines: ls, box: boxOf(ls.flatMap((l) => l.pts)) }));
+  // Even-odd fill: an engraved shape inside another is a hole in it, and one inside that hole is filled again
+  // (an island). A filled shape keeps only its own holes; an island is a shape of its own and can come apart.
+  const nest = new Map<Shape, number>();
+  const depthOf = (s: Shape): number => {
+    let d = nest.get(s);
+    if (d === undefined) { const o = owner.get(s); d = o ? depthOf(o) + 1 : 0; nest.set(s, d); }
+    return d;
+  };
+  const top = (s: Shape): Shape => (depthOf(s) % 2 ? owner.get(s)! : s);
+  const units = new Map<Shape, Line[]>(); // a shape and the engraved holes that must stay with it
+  for (const s of shapes) {
+    const t = top(s);
+    let ls = units.get(t);
+    if (!ls) units.set(t, ls = []);
+    for (const l of s.lines) ls.push(l);
+  }
+  if (depth === 'all') return [...units.values()].map((ls) => ({ lines: ls, box: boxOf(ls.flatMap((l) => l.pts)) }));
+  return peel([...units.entries()].map(([t, ls]) => ({ shape: t, lines: ls })));
+}
+
+/** One layer of Ungroup (see UngroupDepth). Each unit's parent is the smallest closed outline around it. */
+function peel(units: { shape: Shape; lines: Line[] }[]): Piece[] {
+  // units come largest first (shapes were sorted by box area), so the first container found going back is the smallest
+  const parent = new Array<number>(units.length).fill(-1);
+  units.forEach((u, i) => {
+    const [a0, b0, a1, b1] = u.shape.box;
+    const first = u.shape.lines[0].pts;
+    const probes = [first[0], first[Math.floor(first.length / 2)]]; // two, in case one sits on a shared edge
+    for (let j = i - 1; j >= 0; j--) {
+      const t = units[j].shape;
+      if (!t.poly || t.area <= u.shape.area) continue;
+      const [c0, d0, c1, d1] = t.box;
+      if (a0 < c0 || b0 < d0 || a1 > c1 || b1 > d1) continue;
+      if (probes.some((p) => inside(p, t.poly!))) { parent[i] = j; break; }
+    }
+  });
+  const kids: number[][] = units.map(() => []);
+  const roots: number[] = [];
+  parent.forEach((p, i) => (p < 0 ? roots : kids[p]).push(i));
+  const subtree = (i: number): Line[] => {
+    const out: Line[] = [];
+    const stack = [i];
+    while (stack.length) {
+      const k = stack.pop()!;
+      for (const l of units[k].lines) out.push(l);
+      for (const c of kids[k]) stack.push(c);
+    }
+    return out;
+  };
+  let groups: Line[][];
+  if (roots.length > 1) groups = roots.map(subtree); // side by side: each with what is inside it
+  else if (kids[roots[0]].length) groups = [units[roots[0]].lines, ...kids[roots[0]].map(subtree)]; // open the outer box
+  else groups = [units[roots[0]].lines]; // one shape (with its engraved holes): nothing to peel
+  return groups.map((ls) => ({ lines: ls, box: boxOf(ls.flatMap((l) => l.pts)) }));
 }
 
 const PAINT: Record<OpKind, string> = {

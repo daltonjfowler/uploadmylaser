@@ -14,7 +14,7 @@ import { fromBase64 } from './ruida/swizzle';
 import { choosePort, LaserLink, type PortId } from './serial/laser';
 import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
-import { pieceSvg, splitPieces, type Line, type Piece } from './ungroup';
+import { pieceSvg, splitPieces, type Line, type Piece, type UngroupDepth } from './ungroup';
 import { nearestShown, trim, type TrimHit, type TrimLine } from './trim';
 import { zip } from './zip';
 import { nest, spinQ, type NestItem } from './nest';
@@ -880,11 +880,13 @@ $('rotate').onclick = () => {
   changed();
 };
 $('delete').onclick = deleteSelected;
-$('ungroup').onclick = ungroup;
+$('ungroup').onclick = () => ungroup('level');
 $('group').onclick = groupSelected;
 
-/** Replace the selected file with one file per piece, in the same place, from the server's last answer. */
-function ungroup(): void {
+/** Replace the selected file with one file per piece, in the same place, from the server's last answer.
+ *  'level' peels one layer (a frame comes off its contents; each thing keeps what is inside it), 'all' splits
+ *  every shape at once. See UngroupDepth in ungroup.ts. */
+function ungroup(depth: UngroupDepth = 'level'): void {
   const grouped = selection().map(find).filter((q): q is DesignPart => q?.groupId !== undefined);
   if (grouped.length) {
     grouped.forEach((q) => delete q.groupId);
@@ -904,9 +906,18 @@ function ungroup(): void {
   if (pending || !result || i < 0) return say('Wait a moment for the file to be checked, then press Ungroup again.');
   if (result.unassigned?.some((u) => u.part === i)) return say('Choose what each colour does first (under Layers), then press Ungroup.');
   const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
-  if (!lines.length) return say('Nothing in this file to ungroup.');
-  const pieces = splitPieces(lines);
-  if (pieces.length < 2) return say('This file is already one piece.');
+  if (!lines.length) {
+    // a design over the point limit comes back with no lines at all, so "nothing in it" would be wrong
+    return say(result.errors.some((e) => /too detailed/i.test(e))
+      ? 'Ungroup needs the laser lines, and this design is too detailed for the site to make them. Delete other parts first, or simplify the file (fewer curves, or text turned into simpler lines).'
+      : 'Nothing in this file to ungroup.');
+  }
+  const pieces = splitPieces(lines, depth);
+  if (pieces.length < 2) {
+    return say(lines.length > 1 && lines.every((l) => l.kind === 'engrave')
+      ? 'This is already one piece: one engraved shape, and the shapes inside it are holes in its fill, so they stay with it.'
+      : 'This file is already one piece.');
+  }
   if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`Cannot ungroup: this file splits into ${pieces.length} pieces, and one design can hold ${MAX_PARTS} parts. Delete other parts first, or split it in AutoCAD or LightBurn.`);
   const name = p.source.name.replace(/\.(dxf|svg)$/i, '');
   const made: DesignPart[] = pieces.map((pc, k) => ({
@@ -920,7 +931,9 @@ function ungroup(): void {
   // nothing selected afterwards: with every piece selected they move as one and look still grouped
   select(null);
   changed();
-  warn(`Split into ${made.length} pieces. Click a piece to move or delete it on its own.`, '✓');
+  warn(depth === 'level' && pieces.some((pc) => pc.lines.length > 1)
+    ? `Split into ${made.length} pieces, each with what is inside it. Ungroup a piece again to take it apart further, or right-click → Ungroup all the way.`
+    : `Split into ${made.length} pieces. Click a piece to move or delete it on its own.`, '✓');
 }
 /** Until the server answers, draw the pieces from their own lines (the result they came from, renumbered).
  *  Otherwise every piece loads a sketch image, and a floorplan's thousands of them keep the page too busy. */
@@ -1149,6 +1162,13 @@ function select(id: number | null): void {
   renderSizebar();
   renderColors(); // with many files it shows the selected one's colours
   renderSelectButtons();
+}
+
+/** Only a single file can be split into every shape (a group is just untied by Ungroup). */
+function canUngroupAll(): boolean {
+  const ids = selection();
+  const one = ids.length === 1 ? find(ids[0])?.source : undefined;
+  return one?.kind === 'file' && one.fileType !== 'pbm';
 }
 
 function canUngroup(): boolean {
@@ -1711,7 +1731,8 @@ function openMenu(at: { x: number; y: number }): void {
     }
     items.push(null);
     if (ids.length > 1) items.push(['Group', groupSelected]);
-    if (canUngroup()) items.push(['Ungroup', ungroup]);
+    if (canUngroup()) items.push(['Ungroup (one layer)', () => ungroup('level')]);
+    if (canUngroupAll()) items.push(['Ungroup all the way (every shape)', () => ungroup('all')]);
     if (selected !== null) items.push(['Rotate', () => $('rotate').click()]);
     items.push(['Mirror left-right', () => mirrorSelected('x')], ['Mirror up-down', () => mirrorSelected('y')]);
     if (ids.length > 1) items.push(['Line up…', () => openAlignMenu(at)]);
@@ -1788,7 +1809,7 @@ function menuItems(name: string): MenuItem[] {
     case 'arrange': return [
       act('Rotate a quarter turn', 'rotate'), ['Mirror left-right', () => mirrorSelected('x'), !n], ['Mirror up-down', () => mirrorSelected('y'), !n], null,
       ...(Object.keys(ALIGN_LABELS) as AlignHow[]).map((how): MenuItem => [ALIGN_LABELS[how], () => alignSelected(how), n < 2]), null,
-      act('Group', 'group'), act('Ungroup', 'ungroup'), null,
+      act('Group', 'group'), act('Ungroup (one layer)', 'ungroup'), ['Ungroup all the way (every shape)', () => ungroup('all'), !canUngroupAll()], null,
       ['Auto arrange: pack tight to save material', () => autoArrange(true), !parts.length],
       ['Auto arrange: pack, but keep every part\'s turn', () => autoArrange(false), !parts.length],
     ];
