@@ -744,6 +744,8 @@ async function openAny(f: File, replace: boolean): Promise<void> {
     resultIds = [];
   }
   addPart(src);
+  const added = parts[parts.length - 1];
+  if (added?.source === src && src.kind === 'file' && src.fileType !== 'pbm') freshFiles.add(added.id);
 }
 
 $('open').onclick = () => {
@@ -2824,25 +2826,38 @@ async function run(): Promise<void> {
   render();
 }
 
+/** Files the student just opened or imported, until the server has listed their colours once. */
+const freshFiles = new Set<number>();
+
 /**
- * A colour the laser does not know (green, a CAD layer colour) starts as Cut through, so nothing waits
- * grey for a choice and Ungroup, Trim and Send work straight away; Layers still changes it (Dalton
- * 2026-10-30). Only colours nobody chose yet: Skip, or any choice, is kept. Photos cannot be cut.
- * Not an Undo step of its own: it belongs to the import.
+ * Every colour in a file the student just opened or imported starts as Cut through (black), whatever its
+ * colour, so nothing waits grey or gets engraved by surprise; Layers changes any of them (Dalton
+ * 2026-11-12; before that only unknown colours did, 2026-10-30). Later, a colour the laser does not know
+ * (green, a CAD layer colour) still starts as Cut through. Only colours nobody chose yet: Skip, or any
+ * choice, is kept. Photos cannot be cut. Not an Undo step of its own: it belongs to the import.
  */
 function cutUnknownColours(res: ProcessResponse, ids: number[]): void {
   const set = new Map<number, Set<string>>(); // part id -> colour keys set to Cut
+  const seen = new Set<number>(); // fresh files the server has now listed
+  const kept = new Set<number>(); // fresh files with a colour someone already chose
   for (const c of res.partColors ?? []) {
     const p = find(ids[c.part]);
-    if (c.kind !== null || c.key.startsWith('photo:') || p?.source.kind !== 'file') continue;
-    if (colorNow(p.source, c.key, null) !== null) continue;
+    if (!p || p.source.kind !== 'file' || c.key.startsWith('photo:')) continue;
+    const fresh = freshFiles.has(p.id);
+    if (fresh) seen.add(p.id);
+    if (c.kind !== null && !fresh) continue;
+    if (c.kind === 'cut') continue; // black already cuts: nothing to change, nothing to say
+    if (colorNow(p.source, c.key, null) !== null) { if (fresh) kept.add(p.id); continue; }
     p.source.colors = { ...p.source.colors, [c.key]: 'cut' };
     let keys = set.get(p.id);
     if (!keys) set.set(p.id, keys = new Set());
     keys.add(c.key);
   }
+  for (const id of seen) freshFiles.delete(id);
   if (!set.size) return;
-  recolourNow([...set.keys()], null, 'cut');
+  const whole = [...set.keys()].filter((id) => seen.has(id) && !kept.has(id));
+  recolourNow(whole, 'all', 'cut'); // the whole file is Cut now: blue and red lines too
+  recolourNow([...set.keys()].filter((id) => !whole.includes(id)), null, 'cut');
   lastSnap = snap();
   edits++;
   save();
@@ -2851,7 +2866,9 @@ function cutUnknownColours(res: ProcessResponse, ids: number[]): void {
     const hex = /#[0-9a-f]{6}$/i.exec(k)?.[0];
     return hex ? colourName(hex.toLowerCase()) : k;
   }))];
-  warn(`${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} set to Cut through. To engrave or mark instead, change it under Layers.`, '✓');
+  warn(whole.length
+    ? `Everything in the file starts as Cut through (${names.join(', ')}). To engrave or mark a colour instead, change it under Layers.`
+    : `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} set to Cut through. To engrave or mark instead, change it under Layers.`, '✓');
 }
 
 function askPhrase(): void {

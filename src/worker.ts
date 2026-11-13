@@ -36,6 +36,7 @@ import {
   RateLimiter, type RateVerdict,
 } from './ratelimit.ts';
 import { DEFAULT_MACHINE, SEED_MATERIALS } from './seed.ts';
+import { PROCESSOR_NAMES, ProcessorLine, type Ticket } from './processor-line.ts';
 import { minutesPhrase, TeacherKeyGuard, type GuardVerdict } from './teacher-guard.ts';
 import {
   AccountError, accountRoute, checkCredential, logChange, readSignIn, setupAllows, signInOptions, type PasswordCredential, type Who,
@@ -85,6 +86,16 @@ export class Counters extends DurableObject<Env> {
   readonly #clients = new RateLimiter(PROCESS_MAX_PER_MINUTE, RATE_LIMIT_WINDOW_MS);
   readonly #everyone = new RateLimiter(GLOBAL_PROCESS_MAX_PER_MINUTE, RATE_LIMIT_WINDOW_MS);
   readonly #teacherKeys = new TeacherKeyGuard();
+  readonly #line = new ProcessorLine(PROCESSOR_NAMES.length);
+
+  /** Which processor a job goes to: the least busy (src/processor-line.ts). */
+  joinProcessorLine(): Ticket {
+    return this.#line.join(crypto.randomUUID(), Date.now());
+  }
+
+  leaveProcessorLine(token: string): void {
+    this.#line.leave(token);
+  }
 
   checkProcessRate(key: string): RateVerdict & { scope: 'client' | 'everyone' } {
     return checkProcessRate(this.#clients, this.#everyone, key, Date.now());
@@ -282,11 +293,46 @@ async function convertDwg(req: Request, env: Env): Promise<Response> {
 
 class ContainerTimeout extends Error {}
 
-// The only place the container is reached (and its sleep clock renewed). Body read inside the
-// timeout, so a stalled stream cannot hang the request either.
+// The only place a container is reached (and its sleep clock renewed). Body read inside the
+// timeout, so a stalled stream cannot hang the request either. Two processors: the line in Counters
+// picks the least busy (src/processor-line.ts). The line may only spread work, never stop it: if it
+// cannot answer, the first processor does the job, and a job the second processor fails (it would not
+// start, or broke) is tried once more on the first.
 async function callContainer(env: Env, path: string, body?: string): Promise<{ status: number; text: string }> {
+  let ticket: Ticket | null = null;
+  try {
+    ticket = await countersStub(env).joinProcessorLine();
+  } catch (e) {
+    console.error(JSON.stringify({ message: 'processor line unreachable, using the first processor', error: String(e) }));
+  }
+  const pick = ticket && ticket.container > 0 && ticket.container < PROCESSOR_NAMES.length ? ticket.container : 0;
+  try {
+    if (pick === 0) return await askProcessor(env, PROCESSOR_NAMES[0], path, body);
+    let why: string;
+    try {
+      const r = await askProcessor(env, PROCESSOR_NAMES[pick], path, body);
+      if (r.status < 500) return r;
+      why = `status ${r.status}`;
+    } catch (e) {
+      if (e instanceof ContainerTimeout) throw e; // 30 s already spent: a second try would only double the wait
+      why = String(e);
+    }
+    console.error(JSON.stringify({ message: 'second processor failed, trying the first', processor: PROCESSOR_NAMES[pick], why }));
+    return await askProcessor(env, PROCESSOR_NAMES[0], path, body);
+  } finally {
+    if (ticket) {
+      try {
+        await countersStub(env).leaveProcessorLine(ticket.token);
+      } catch {
+        // the entry expires on its own (LINE_STALE_MS)
+      }
+    }
+  }
+}
+
+async function askProcessor(env: Env, name: string, path: string, body?: string): Promise<{ status: number; text: string }> {
   const work = (async () => {
-    const r = await getContainer(env.PROCESSOR).fetch(new Request('http://container' + path, body === undefined
+    const r = await getContainer(env.PROCESSOR, name).fetch(new Request('http://container' + path, body === undefined
       ? undefined
       : { method: 'POST', headers: { 'content-type': 'application/json' }, body }));
     return { status: r.status, text: await r.text() };

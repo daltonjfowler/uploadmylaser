@@ -36,7 +36,7 @@
       "image": "./container/Dockerfile",
       "image_build_context": "./container",
       "instance_type": "basic",
-      "max_instances": 2
+      "max_instances": 2 // = PROCESSOR_NAMES in src/processor-line.ts: the old default name + "laser-1"
     }
   ],
   // Per-IP fuses checked before the class phrase (src/ip-limit.ts), so phrases cannot be guessed
