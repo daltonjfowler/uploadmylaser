@@ -46,6 +46,7 @@ only: no code from them is copied here.
   from [Google Fonts](https://github.com/google/fonts): downloaded into the container image, and
   self-hosted for the font picker via [Fontsource](https://fontsource.org) (MIT). Their licence texts
   are in `web/public/licenses.txt`.
+- **More Text tool fonts** (SIL OFL 1.1 or Apache 2.0, from Google Fonts, same way): Bebas Neue, Staatliches, Archivo Black, Russo One, Passion One, Titan One, Luckiest Guy, Bowlby One SC, Ultra, Alfa Slab One, Abril Fatface, Shrikhand, Rubik Mono One, Bangers, Chewy, Cherry Bomb One, Creepster, Monoton, Bungee Inline, Bungee Shade, Righteous, Audiowide, Press Start 2P, Special Elite, Pirata One, UnifrakturMaguntia, Lobster, Satisfy, Great Vibes, Kaushan Script, Yellowtail, Sacramento, Rock Salt, Gloria Hallelujah, Caveat Brush, Sedgwick Ave Display, Amatic SC, Black Ops One, Saira Stencil One, Stardos Stencil, Wallpoet.
 
 ## The web app and Worker
 

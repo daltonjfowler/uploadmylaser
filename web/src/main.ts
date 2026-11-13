@@ -1,11 +1,7 @@
 // Student app, laid out like desktop laser software: toolbar, tools on the left, the bed in the middle,
 // Layers and Laser panels on the right. Every part is processed by the server; the page only
 // arranges parts, previews what comes back, and streams the finished job over USB.
-import '@fontsource/anton/latin-400.css';
-import '@fontsource/bungee/latin-400.css';
-import '@fontsource/permanent-marker/latin-400.css';
-import '@fontsource/pacifico/latin-400.css';
-import '@fontsource/allerta-stencil/latin-400.css';
+import './fonts';
 import type {
   ColorChoice, DxfUnits, OpKind, Part, PartExtras, Placement, ProcessRequest, ProcessResponse, PublicMaterial, TextFontId, TextSpec,
 } from '../../shared/contracts';
@@ -1190,10 +1186,22 @@ function opOf(p: DesignPart | undefined): OpKind | null {
 // ---------- size bar ----------
 
 const fontSel = $<HTMLSelectElement>('textFont');
-for (const f of TEXT_FONTS) {
-  const o = new Option(f.label, f.id);
-  o.style.fontFamily = f.css;
-  fontSel.add(o);
+{
+  // Headings in this order (a font's group is in TEXT_FONTS); a new group name goes at the end.
+  const order = ['Basic', 'Bold', 'Fun', 'Handwriting', 'Stencil'];
+  const groups = [...new Set<string>([...order, ...TEXT_FONTS.map((f) => f.group)])];
+  for (const name of groups) {
+    const fonts = TEXT_FONTS.filter((f) => f.group === name);
+    if (!fonts.length) continue;
+    const g = document.createElement('optgroup');
+    g.label = name === 'Stencil' ? 'Stencil (best for Cut through)' : name;
+    for (const f of fonts) {
+      const o = new Option(f.label, f.id);
+      o.style.fontFamily = f.css.includes(',') ? f.css : `'${f.css}'`;
+      g.append(o);
+    }
+    fontSel.append(g);
+  }
 }
 
 function renderSizebar(): void {
