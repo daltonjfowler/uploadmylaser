@@ -9,7 +9,7 @@ anything not marked verified there as a guess.
 - `src/worker.ts`: Worker: KV presets, phrase gate, teacher key, forwards to `LaserContainer`.
 - `container/app/`: FastAPI. `geometry/` (svg/dxf/text import, placement, hatch, ordering),
   `ruida/` (swizzle, encoder, decoder), `pipeline.py` wires it together. `runner.py` runs each job in a
-  worker process that is killed after 25 s, and importers share a point budget (`PointBudget`), because one
+  worker process that is killed after 30 s, and importers share a point budget (`PointBudget`), because one
   container serves the whole school.
 - `src/lockout.ts`: per-DEVICE wrong-try lockout on the class phrase and teacher key (`x-device-id` from
   `web/src/device.ts`, IP only when no valid id). 5 wrong in a row lock 5 s, doubling to 300 s; right answer

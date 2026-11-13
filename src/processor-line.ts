@@ -11,7 +11,7 @@
  *  default name (getContainer with no name) instead of a new one. */
 export const PROCESSOR_NAMES = ['cf-singleton-container', 'laser-1'] as const;
 
-/** The Worker gives up on a processor call after 30 s; a little longer and the entry is surely dead. */
+/** The Worker gives up on a processor call after 35 s; a little longer and the entry is surely dead. */
 export const LINE_STALE_MS = 45_000;
 
 /** A runaway (or hostile) burst cannot grow the object without bound: past this many, the oldest go. */

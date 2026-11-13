@@ -147,7 +147,7 @@ def test_dxf_minsert_grid_bomb_is_refused():
     ref.grid(size=(100_000, 100_000), spacing=(2, 2))
     res, s = timed(job(dxf_bytes(doc), "dxf"))
     assert res.errors == [TOO_DETAILED]
-    # the point is that it stops at all; a busy test box can take a few seconds (runner kills at 25 s)
+    # the point is that it stops at all; a busy test box can take a few seconds (runner kills at 30 s)
     assert s < 20
 
 

@@ -29,7 +29,7 @@ class Item:
 
 # Points in one whole job. Importers count as they go (PointBudget), so a hostile file fails fast
 # instead of building millions of points first.
-MAX_POINTS = 300_000
+MAX_POINTS = 500_000  # was 300k on the quarter-CPU basic instance; 500k ~12 s on 1 vCPU (Dalton 2026-11-12)
 TOO_DETAILED = "This design is too detailed. Simplify it and try again."
 
 

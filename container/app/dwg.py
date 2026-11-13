@@ -24,8 +24,8 @@ from .models import _Camel
 
 MAX_DWG_BYTES = 10 * 1024 * 1024
 MAX_DXF_BYTES = 10 * 1024 * 1024  # the page takes 10 MB of files per design (MAX_UPLOAD_BYTES)
-TIME_LIMIT_S = 20.0  # under the Worker's 30 s
-# 2 job workers x 512 MB (runner.py) + this must fit the ~1 GiB basic instance as far as possible
+TIME_LIMIT_S = 20.0  # under the Worker's 35 s
+# 2 job workers x 1 GiB (runner.py) + this fit the 3 GiB instance
 MEMORY_LIMIT_BYTES = 384 * 1024 * 1024
 DWG2DXF = shutil.which("dwg2dxf")
 

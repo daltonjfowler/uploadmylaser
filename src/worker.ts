@@ -59,7 +59,7 @@ interface Env {
 
 const KV_MATERIALS = 'materials';
 const KV_MACHINE = 'machine';
-const CONTAINER_TIMEOUT_MS = 30_000;
+const CONTAINER_TIMEOUT_MS = 35_000; // the container stops a job at 30 s (runner.py) and says why; this is the backstop
 const TEACHER_REJECT_DELAY_MS = 300;
 const MAX_TEACHER_BYTES = 4 * 1024;
 const MAX_MATERIALS_BYTES = 64 * 1024;
@@ -314,7 +314,7 @@ async function callContainer(env: Env, path: string, body?: string): Promise<{ s
       if (r.status < 500) return r;
       why = `status ${r.status}`;
     } catch (e) {
-      if (e instanceof ContainerTimeout) throw e; // 30 s already spent: a second try would only double the wait
+      if (e instanceof ContainerTimeout) throw e; // 35 s already spent: a second try would only double the wait
       why = String(e);
     }
     console.error(JSON.stringify({ message: 'second processor failed, trying the first', processor: PROCESSOR_NAMES[pick], why }));

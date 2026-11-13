@@ -1,7 +1,7 @@
 """Runs each job in a worker process with a hard time limit (and, on Linux, a memory cap).
 
 One container serves the whole school. A runaway design must not keep a CPU busy after the Worker has
-given up on it (30 s), so when a job runs out of time its process is killed and a fresh one takes its
+given up on it (35 s), so when a job runs out of time its process is killed and a fresh one takes its
 place. Threads can't be killed, which is why this is processes.
 """
 from __future__ import annotations
@@ -16,9 +16,9 @@ from typing import Any, Callable
 
 from .models import ProcessResponse
 
-TIME_LIMIT_S = 25.0  # under the Worker's 30 s, so the student reads our message instead of a timeout
+TIME_LIMIT_S = 30.0  # under the Worker's 35 s, so the student reads our message instead of a timeout (Dalton 2026-11-12: was 25)
 WORKERS = 2  # a runaway job holds one; the other keeps serving the class
-MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # per worker; the basic instance has 1 GiB
+MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024  # per worker: 2 x 1 GiB + a DWG convert fit the 3 GiB instance (500k points peak ~400 MB)
 START_LIMIT_S = 60.0  # a fresh worker imports shapely, ezdxf, ...: slow on a quarter of a CPU
 
 TOO_SLOW = "This design took too long to get ready. Simplify it and try again."

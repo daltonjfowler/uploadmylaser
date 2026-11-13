@@ -35,7 +35,9 @@
       "class_name": "LaserContainer",
       "image": "./container/Dockerfile",
       "image_build_context": "./container",
-      "instance_type": "basic",
+      // 1 vCPU / 3 GiB like uploadmymodel (Dalton 2026-11-12): ~6x faster than basic's quarter CPU, so detailed
+      // board games fit in the 30 s job limit (500k points ~12 s measured). 3 GiB is the floor for 1 vCPU.
+      "instance_type": { "vcpu": 1, "memory_mib": 3072, "disk_mb": 4000 },
       "max_instances": 2 // = PROCESSOR_NAMES in src/processor-line.ts: the old default name + "laser-1"
     }
   ],
