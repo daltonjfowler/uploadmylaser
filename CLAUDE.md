@@ -17,8 +17,9 @@ anything not marked verified there as a guess.
 - Teacher accounts (Dalton 2026-10-30): `src/teachers.ts` (server) and `web/src/teacher-account.ts` + `.css`
   (teacher page) are the SAME files on all four uploadmy sites: change one, copy to all four. Each teacher picks
   their own password (start code first); accounts live in the shared `TEACHERS_KV` namespace, sessions are signed
-  with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) still
-  works until those secrets are deleted. Teacher changes are logged with the name (`logChange`, "Recent changes").
+  with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) secrets
+  were deleted on 2026-11-12 (Dalton); sign-in is accounts only. To get in with no working account, put a
+  `TEACHER_KEY` secret back for a moment, sign in with it as "Shared key", fix the account, then delete it again. Teacher changes are logged with the name (`logChange`, "Recent changes").
 - `web/`: Vite multi-page (index, teacher/, display/). `serial-test.html` is dev-only and must stay
   OUT of the production build (it sends raw bytes to the laser). No framework. Keep the bundle small, since
   Chromebooks are slow. `workspace.ts` is the canvas, `main.ts` the app state, `shapes.ts` draws Box/Circle as SVG.
