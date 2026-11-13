@@ -49,6 +49,8 @@ let pasteCount = 0;
 let result: ProcessResponse | null = null;
 let resultIds: number[] = []; // part id for each index in `result`
 let pending = false;          // a change is waiting for the server, so `result` is out of date
+let inFlight = 0;             // requests to the server not answered yet
+let building = false;         // making the laser file for Send / Download / Export right now
 let notes: string[] = [];     // "Frame sent." and friends
 let link: LaserLink | null = null;
 let locked = true;            // resize keeps the shape (the lock button in the size bar)
@@ -362,7 +364,7 @@ function moveParts(ids: number[], dx: number, dy: number): void {
   }
   jobBoxNow();
   ws.clearLive();
-  changed({ exact: true });
+  changed({ exact: true, local: true });
 }
 
 /** Each part's box is mapped from the old selection box onto the new one, so a group keeps its
@@ -1795,7 +1797,7 @@ function pickPicture(style: 'trace' | 'dither'): void {
 
 function menuItems(name: string): MenuItem[] {
   const n = selection().length;
-  const hasJob = !!result?.rd && !pending && !result.errors.length;
+  const hasJob = canBuild();
   switch (name) {
     case 'file': return [
       act('Open… (start over)', 'open'), act('Import… (add to the bed)', 'import'),
@@ -2009,12 +2011,63 @@ function staleView(): boolean {
 /** Something about the design changed: remember it for Undo, save it, redraw, and re-process soon.
  *  `merge` folds quick repeats (typing, nudging) into one Undo step. `exact`: the lines on screen were
  *  already changed to match (a move, a trim), so they are not out of date. */
-function changed(opts: { merge?: string; history?: boolean; exact?: boolean } = {}): void {
+/** `local`: only parts moved (drag, arrows, X/Y, line up, pack). The lines on screen are already shifted, so
+ *  the server is not asked at all; the old laser file is dropped and the bed edge is checked here. The laser
+ *  file is built only when it is needed: Send, Download, Export (Dalton 2026-11-12). */
+function changed(opts: { merge?: string; history?: boolean; exact?: boolean; local?: boolean } = {}): void {
   if (!opts.exact) edits++;
   if (opts.history !== false) record(opts.merge);
   save();
-  schedule();
+  // a request still on its way was built before this move, and its answer would put the parts back
+  if (opts.local && result && !pending && !inFlight) {
+    result.rd = null;
+    result.frameRd = null;
+    checkBedNow();
+  } else {
+    schedule();
+  }
   render();
+}
+
+// The server's own words, so a bed message looks the same whoever found it (container/app/pipeline.py).
+const OFF_BED = 'The design goes off the edge of the laser bed. Move it or make it smaller.';
+const TOO_BIG = 'The design is bigger than the laser bed. Make it smaller.';
+
+/** After a move in the page: the bed-edge check the server would make, from the parts' boxes. */
+function checkBedNow(): void {
+  if (!result) return;
+  const errors = result.errors.filter((e) => e !== OFF_BED && e !== TOO_BIG);
+  const b = result.bboxMm;
+  if (b) {
+    const [x0, y0, x1, y1] = b;
+    const W = machine.bedWidthMm, H = machine.bedHeightMm;
+    if (relative()) { if (x1 - x0 > W + 0.01 || y1 - y0 > H + 0.01) errors.push(TOO_BIG); }
+    else if (x0 < -0.01 || y0 < -0.01 || x1 > W + 0.01 || y1 > H + 0.01) errors.push(OFF_BED);
+  }
+  result.errors = errors;
+}
+
+/** The design can become a laser file: drawn by the server, nothing waiting, no problems. */
+function canBuild(): boolean {
+  return !!result && !pending && !building && !result.errors.length && !!parts.length;
+}
+
+/** The laser file for the design as it is now: the one already made, or made now (Send / Download / Export
+ *  are the only callers). Null when it could not be made; the problem is on screen. */
+async function laserFileNow(): Promise<string | null> {
+  if (result?.rd && !pending && !inFlight) return result.rd;
+  clearTimeout(timer);
+  building = true;
+  $('busyText').textContent = 'Making the laser file…';
+  updateButtons();
+  try {
+    await run(true);
+  } finally {
+    building = false;
+    $('busyText').textContent = 'Updating the laser lines…';
+    updateButtons();
+  }
+  return result?.rd && !pending && !result.errors.length ? result.rd : null;
 }
 
 // ---------- undo / redo ----------
@@ -2214,7 +2267,7 @@ function alignSelected(how: AlignHow): void {
     shiftResult(id, dx, dy);
   }
   jobBoxNow();
-  changed({ exact: true });
+  changed({ exact: true, local: true });
 }
 
 // ---------- auto arrange: pack the pieces tight to save material ----------
@@ -2316,7 +2369,7 @@ function autoArrange(turns: boolean): void {
   if (turned) changed();
   else {
     jobBoxNow();
-    changed({ exact: true });
+    changed({ exact: true, local: true });
   }
   warn(`Packed ${pieces.length} piece${pieces.length === 1 ? '' : 's'} together, ${NEST_GAP_MM} mm apart. Touching parts stayed together. Ctrl+Z puts them back.`, '✓');
 }
@@ -2734,7 +2787,8 @@ function schedule(delay = 400): void {
   timer = window.setTimeout(run, delay);
 }
 
-function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
+/** `laserFile` false (every edit): only what the page draws. True only for Send / Download / Export. */
+function buildRequest(laserFile = false): { req: ProcessRequest; files: Blob[]; ids: number[] } {
   const files: Blob[] = [];
   const ids: number[] = [];
   const reqParts: Part[] = [];
@@ -2770,12 +2824,12 @@ function buildRequest(): { req: ProcessRequest; files: Blob[]; ids: number[] } {
     }
     ids.push(p.id);
   }
-  return { req: { materialId, parts: reqParts, colorMap, powerChoice, ...(joinLines ? {} : { joinLines: false }) }, files, ids };
+  return { req: { materialId, parts: reqParts, colorMap, powerChoice, ...(joinLines ? {} : { joinLines: false }), ...(laserFile ? {} : { laserFile: false }) }, files, ids };
 }
 
-async function run(): Promise<void> {
+async function run(laserFile = false): Promise<void> {
   const at = edits;
-  const { req, files, ids } = buildRequest();
+  const { req, files, ids } = buildRequest(laserFile);
   if (!materialId || !req.parts.length) {
     result = null;
     resultIds = [];
@@ -2796,6 +2850,7 @@ async function run(): Promise<void> {
   setBusy(true);
   const ctx = sigCtx();
   const sigs = ids.map((id) => partSig(find(id)!, ctx));
+  inFlight++;
   try {
     const res = await processDesign(req, files);
     if (mine !== seq) return; // a newer request superseded this one
@@ -2819,6 +2874,8 @@ async function run(): Promise<void> {
     if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
       setPhrase(''); // wrong or expired: the phrase card at the top of the side panel asks again
     }
+  } finally {
+    inFlight--;
   }
   pending = false;
   setBusy(false);
@@ -2969,7 +3026,7 @@ function render(): void {
   }
   const li = (t: string, cls: string) => Object.assign(document.createElement('li'), { textContent: t, className: cls });
   $('messages').replaceChildren(...errors.map((e) => li(e, 'err')), ...notes.map((n) => li(n, 'note')), ...warnings.map((w) => li(w, 'warn')), ...weldOffer());
-  $('estimate').textContent = result?.rd && !pending ? `About ${fmtTime(result.estimateS)} on the laser.` : '';
+  $('estimate').textContent = result && !pending && !result.errors.length && result.estimateS ? `About ${fmtTime(result.estimateS)} on the laser.` : '';
   $('rotate').toggleAttribute('disabled', selected === null);
   renderSelectButtons();
   $('delete').toggleAttribute('disabled', !selection().length);
@@ -3145,7 +3202,7 @@ function setConnected(on: boolean): void {
 }
 
 function updateButtons(): void {
-  const hasJob = !!result?.rd && !pending && !result.errors.length;
+  const hasJob = canBuild();
   const connected = !!link?.connected;
   const idle = !link?.sending;
   const ack = $<HTMLInputElement>('ack').checked;
@@ -3249,9 +3306,11 @@ async function sendBytes(b64: string): Promise<boolean> {
 // The job as a Ruida .rd file, for a laser in another room (the panel's USB port, or RDWorks).
 // It is the same file Send would load, with the teacher's limits already applied.
 $('downloadRd').onclick = async () => {
-  if (!result?.rd || pending || result.errors.length) return;
+  if (!canBuild()) return;
+  const rd = await laserFileNow();
+  if (!rd) return warn(result?.errors[0] ?? 'The laser file could not be made. Try again in a moment.');
   const name = (cleanPanelName($<HTMLInputElement>('panelName').value) || suggestedPanelName() || 'DESIGN').replace(/ /g, '');
-  const ok = await saveBlob(new Blob([fromBase64(result.rd) as BlobPart], { type: 'application/octet-stream' }), `${name}.rd`, 'Ruida laser file', '.rd');
+  const ok = await saveBlob(new Blob([fromBase64(rd) as BlobPart], { type: 'application/octet-stream' }), `${name}.rd`, 'Ruida laser file', '.rd');
   if (ok) warn('Laser file saved. Give it to your teacher: it opens on the laser from a USB stick.', '✓');
 };
 
@@ -3261,7 +3320,7 @@ $('exportTeacher').onclick = async () => {
   if (!parts.length) return warn('Add something to the workspace first.');
   const name = designName();
   const enc = new TextEncoder();
-  const ready = !!result?.rd && !pending && !result.errors.length;
+  const ready = canBuild() && !!(await laserFileNow());
   const rdName = `${(cleanPanelName($<HTMLInputElement>('panelName').value) || suggestedPanelName() || 'DESIGN').replace(/ /g, '')}.rd`;
   const mat = materials.find((x) => x.id === materialId);
   const problems = [...(result?.errors ?? []), ...(result?.warnings ?? []), ...(pending ? ['It was still updating when this was saved.'] : []), ...(!ready && !getPhrase() ? ['The class phrase was not entered, so the laser file could not be made.'] : [])];
@@ -3291,8 +3350,10 @@ $('exportTeacher').onclick = async () => {
 };
 
 $('send').onclick = async () => {
-  if (!result?.rd) return;
-  await sendBytes(result.rd);
+  if (!canBuild()) return;
+  const rd = await laserFileNow(); // the laser file is made here, and only here, for the laser
+  if (!rd) return warn(result?.errors[0] ?? 'The laser file could not be made. Try again in a moment.');
+  await sendBytes(rd);
   $<HTMLInputElement>('ack').checked = false; // confirm again before the next piece
   updateButtons();
 };
@@ -3369,7 +3430,7 @@ document.addEventListener('keydown', (e) => {
       shiftResult(id, d[0], d[1]);
     }
     jobBoxNow();
-    changed({ merge: `nudge${ids.join(',')}`, exact: true });
+    changed({ merge: `nudge${ids.join(',')}`, exact: true, local: true });
   }
 });
 

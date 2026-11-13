@@ -64,6 +64,7 @@ export function validateProcessRequest(body: unknown, fileFields: ReadonlySet<nu
   const powerChoice = validatePowerChoice(body.powerChoice);
   if (powerChoice) out.powerChoice = powerChoice;
   if (body.joinLines === false) out.joinLines = false;
+  if (body.laserFile === false) out.laserFile = false;
   return out;
 }
 

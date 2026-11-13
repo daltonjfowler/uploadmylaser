@@ -104,6 +104,9 @@ class ProcessRequest(_Camel):
     color_map: dict[str, ColorChoice] = {}
     power_choice: dict[OpKind, float] = {}  # only honoured for ops with a student range
     join_lines: bool = True  # chain touching lines into single paths and drop repeats (cut and mark)
+    # False: only what the page draws (lines, colours, boxes, warnings, a rough time). No fill, cut order or
+    # laser file: those are built only when the student presses Send / Download / Export (Dalton 2026-11-12).
+    laser_file: bool = True
 
 
 class ContainerJob(_Camel):

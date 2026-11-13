@@ -94,6 +94,9 @@ export interface ProcessRequest {
   colorMap?: Record<string, ColorChoice>;
   powerChoice?: Partial<Record<OpKind, number>>; // clamped server-side to the teacher's range
   joinLines?: boolean; // default true: touching lines are cut as one path, repeats dropped
+  /** false: preview only (lines, colours, boxes, warnings, a rough time), no fill, cut order or laser file.
+   *  The page sends false for every edit and builds the laser file only for Send / Download / Export. */
+  laserFile?: boolean;
 }
 
 export interface PreviewLayer { kind: OpKind; part: number; paths: [Mm, Mm][][] }

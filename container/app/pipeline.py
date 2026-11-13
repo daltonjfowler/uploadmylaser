@@ -6,7 +6,7 @@ import binascii
 import math
 
 from .geometry import MAX_POINTS, TOO_DETAILED, ImportProblem, ImportWarnings, Item, PointBudget, Pt, TooDetailed
-from .geometry.hatch import hatch
+from .geometry.hatch import hatch, region
 from .geometry.order import join_paths, nearest_neighbour, order_cut_groups
 from .geometry.photo_import import PHOTO_KEY
 from .geometry.shapes_ops import close_gaps, join_touching, outline, weld
@@ -93,6 +93,21 @@ def apply_power_choice(s: OpSettings, choice: float | None) -> OpSettings:
 
 def _length(p: list[Pt]) -> float:
     return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(p, p[1:]))
+
+
+def rough_seconds(kind: OpKind, s: OpSettings, shown: list[list[Pt]], closed: list[Item] | None = None,
+                  photo: list[list[Pt]] | None = None) -> float:
+    """A quick time for the preview, without building the toolpaths: cut and mark lines at their speed, a fill
+    as its area in scan lines. No travel, so a little under the real job; the laser file has the exact one."""
+    if kind != "engrave":
+        return s.passes * sum(_length(p) / s.speed_mm_s + 0.01 * len(p) for p in shown)
+    spacing = s.hatch_mm or DEFAULT_HATCH_MM
+    try:
+        area = region([i.pts for i in closed or []], [i.group for i in closed or []]).area
+    except Exception:  # a broken outline: the full build will say so
+        area = 0.0
+    dots = sum(_length(p) for p in photo or [])
+    return s.passes * ((area / spacing) + dots) / s.speed_mm_s
 
 
 def estimate_seconds(layers: list[tuple[OpKind, OpSettings, list[list[Pt]]]], travel_mm_s: float) -> float:
@@ -206,6 +221,8 @@ def process(job: ContainerJob) -> ProcessResponse:
     # Too big or off the edge: still draw the parts so the student can see why, but skip ordering,
     # hatching and encoding. A design the size of a house would otherwise hatch for minutes.
     off_bed = bool(res.errors)
+    sketch = off_bed or not req.laser_file  # draw only: no fill, cut order or laser file
+    rough = 0.0
 
     # build toolpaths per op across the whole job, in cutting order; preview per (part, op)
     # Which part a path came from, even if ordering reversed it: every placed point is its own tuple object.
@@ -229,8 +246,10 @@ def process(job: ContainerJob) -> ProcessResponse:
             if len(closed) < len(rest):
                 warnings.add("Open lines can't be filled, so they were skipped for engraving.")
                 res.open_engrave_parts = sorted({pi for pi, i in joined if not i.closed})
-            lines = [] if off_bed else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed], cur)
-            paths = lines + ([] if off_bed else [i.pts for i in photo])
+            lines = [] if sketch else hatch([i.pts for i in closed], s.hatch_mm or DEFAULT_HATCH_MM, [i.group for i in closed], cur)
+            paths = lines + ([] if sketch else [i.pts for i in photo])
+            if sketch and not off_bed:
+                rough += rough_seconds(kind, s, [], closed, [i.pts for i in photo])
             try:  # scan lines get their own budget (the photo's dots were counted on import)
                 PointBudget(MAX_POINTS).take(sum(len(p) for p in lines))
             except TooDetailed:
@@ -238,8 +257,10 @@ def process(job: ContainerJob) -> ProcessResponse:
                 res.warnings = list(warnings)
                 return res
             shown = [i.pts for i in closed] + [i.pts for i in photo]
-        elif off_bed:
+        elif sketch:
             paths, shown = [], [i.pts for _, i in group]
+            if not off_bed:
+                rough += rough_seconds(kind, s, shown)
         else:
             # the preview keeps each part's own lines; only the laser's paths are joined
             shown = [i.pts for _, i in group]
@@ -260,6 +281,9 @@ def process(job: ContainerJob) -> ProcessResponse:
             cur = paths[-1][-1]
     res.warnings = list(warnings)
     if off_bed:
+        return res
+    if not req.laser_file:
+        res.estimate_s = round(rough, 1)
         return res
 
     res.estimate_s = round(estimate_seconds(layers, m.travel_speed_mm_s), 1)  # shown, never a limit (Dalton)
