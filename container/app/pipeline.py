@@ -257,6 +257,7 @@ def process(job: ContainerJob) -> ProcessResponse:
                 res.warnings = list(warnings)
                 return res
             shown = [i.pts for i in closed] + [i.pts for i in photo]
+            shown_groups = [i.group for i in closed] + [i.group for i in photo]
         elif sketch:
             paths, shown = [], [i.pts for _, i in group]
             if not off_bed:
@@ -272,10 +273,16 @@ def process(job: ContainerJob) -> ProcessResponse:
                 paths = [p for g in groups for p in g]
                 batches[kind] = [len(g) for g in groups]
         shown_by_part: dict[int, list[list[Pt]]] = {}
-        for p in shown:
-            shown_by_part.setdefault(owner[id(p[0])], []).append(p)
+        groups_by_part: dict[int, list[int]] = {}
+        for k, p in enumerate(shown):
+            pi = owner[id(p[0])]
+            shown_by_part.setdefault(pi, []).append(p)
+            if kind == "engrave":
+                g = shown_groups[k]
+                groups_by_part.setdefault(pi, []).append(-1 if g is None else g)
         for pi in sorted({pi for pi, _ in group}):
-            res.preview.append(PreviewLayer(kind=kind, part=pi, paths=_round(shown_by_part.get(pi, []))))
+            res.preview.append(PreviewLayer(kind=kind, part=pi, paths=_round(shown_by_part.get(pi, [])),
+                                            groups=groups_by_part.get(pi, []) if kind == "engrave" else None))
         if paths:
             layers.append((kind, s, paths))
             cur = paths[-1][-1]

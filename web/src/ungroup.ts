@@ -6,7 +6,9 @@
 import type { OpKind } from '../../shared/contracts';
 
 type Pt = [number, number];
-export interface Line { kind: OpKind; pts: Pt[] }
+/** `group`: the engrave fill group the server sent (PreviewLayer.groups). Only a shape in the SAME group is a
+ *  hole; separate SVG shapes on top of each other are both filled. Missing (older server) = one group. */
+export interface Line { kind: OpKind; pts: Pt[]; group?: number }
 export interface Piece { lines: Line[]; box: [number, number, number, number] }
 
 const NEAR = 0.02; // mm: ends this close meet (the server rounds to 0.01)
@@ -122,14 +124,16 @@ export function splitPieces(lines: Line[], depth: UngroupDepth = 'all'): Piece[]
   for (const s of shapes) s.area = (s.box[2] - s.box[0]) * (s.box[3] - s.box[1]);
   shapes.sort((a, b) => b.area - a.area);
 
-  // an engraved shape goes with the smallest engraved outline around it; everything else is its own piece
+  // an engraved shape goes with the smallest engraved outline around it in its own fill group (the server
+  // fills separate groups on top of each other, so there it is no hole); everything else is its own piece
   const engraved = (s: Shape) => s.lines.every((l) => l.kind === 'engrave');
+  const groupOf = (s: Shape) => s.lines[0].group ?? -1;
   const owner = new Map<Shape, Shape>();
   shapes.forEach((s, i) => {
     if (!engraved(s)) return;
     for (let j = i - 1; j >= 0; j--) { // bigger ones come first, so the first hit going back is the smallest
       const t = shapes[j];
-      if (!t.poly || t === s || !engraved(t)) continue;
+      if (!t.poly || t === s || !engraved(t) || groupOf(t) !== groupOf(s)) continue;
       const [a0, b0, a1, b1] = s.box;
       const [c0, d0, c1, d1] = t.box;
       if (a0 < c0 || b0 < d0 || a1 > c1 || b1 > d1) continue;
@@ -155,7 +159,12 @@ export function splitPieces(lines: Line[], depth: UngroupDepth = 'all'): Piece[]
     if (!ls) units.set(t, ls = []);
     for (const l of s.lines) ls.push(l);
   }
-  if (depth === 'all') return [...units.values()].map((ls) => ({ lines: ls, box: boxOf(ls.flatMap((l) => l.pts)) }));
+  if (depth === 'all') {
+    // One engraved shape with holes and nothing else: "all the way" breaks it apart, like LightBurn's Break Apart
+    // (Dalton 2026-11-14: Ungroup kept saying "one piece"). The holes then engrave solid; main.ts says so.
+    const each = units.size === 1 && shapes.length > 1 ? shapes.map((s) => s.lines) : [...units.values()];
+    return each.map((ls) => ({ lines: ls, box: boxOf(ls.flatMap((l) => l.pts)) }));
+  }
   return peel([...units.entries()].map(([t, ls]) => ({ shape: t, lines: ls })));
 }
 
@@ -203,17 +212,25 @@ const PAINT: Record<OpKind, string> = {
 
 const r = (v: number) => Math.round(v * 100) / 100;
 
-/** A piece as an SVG in mm, drawn from its own top-left corner. One path per colour, so engraved holes stay empty. */
+/** A piece as an SVG in mm, drawn from its own top-left corner. One path per colour, so engraved holes stay
+ *  empty, and one engrave path per fill group, so shapes drawn on top of each other stay filled. */
 export function pieceSvg(piece: Piece): string {
   const [x0, y0, x1, y1] = piece.box;
   const w = Math.max(r(x1 - x0), 0.01);
   const h = Math.max(r(y1 - y0), 0.01);
-  const body = (['engrave', 'score', 'cut'] as OpKind[]).map((kind) => {
-    const d = piece.lines.filter((l) => l.kind === kind).map((l) => {
+  const pathOf = (ls: Line[], kind: OpKind) => {
+    const d = ls.map((l) => {
       const pts = l.pts.map(([x, y]) => `${r(x - x0)} ${r(y - y0)}`);
       return `M${pts[0]}L${pts.slice(1).join(' ')}${isClosed(l.pts) ? 'Z' : ''}`;
     }).join('');
     return d ? `<path d="${d}" ${PAINT[kind]}/>` : '';
+  };
+  const body = (['engrave', 'score', 'cut'] as OpKind[]).map((kind) => {
+    const mine = piece.lines.filter((l) => l.kind === kind);
+    if (kind !== 'engrave') return pathOf(mine, kind);
+    const byGroup = new Map<number, Line[]>();
+    for (const l of mine) { const g = l.group ?? -1; let a = byGroup.get(g); if (!a) byGroup.set(g, a = []); a.push(l); }
+    return [...byGroup.values()].map((ls) => pathOf(ls, kind)).join('');
   }).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}">${body}</svg>`;
 }

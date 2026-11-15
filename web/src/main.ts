@@ -909,7 +909,7 @@ function ungroup(depth: UngroupDepth = 'level'): void {
   if (!materialId) return say('Ungroup works on the laser lines. Pick your material under Layers first.');
   if (pending || !result || i < 0) return say('Wait a moment for the file to be checked, then press Ungroup again.');
   if (result.unassigned?.some((u) => u.part === i)) return say('Choose what each colour does first (under Layers), then press Ungroup.');
-  const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
+  const lines: Line[] = result.preview.filter((l) => l.part === i).flatMap((l) => l.paths.map((pts, k) => ({ kind: l.kind, pts, group: l.groups?.[k] })));
   if (!lines.length) {
     // a design over the point limit comes back with no lines at all, so "nothing in it" would be wrong
     return say(result.errors.some((e) => /too detailed/i.test(e))
@@ -918,8 +918,9 @@ function ungroup(depth: UngroupDepth = 'level'): void {
   }
   const pieces = splitPieces(lines, depth);
   if (pieces.length < 2) {
+    if (p.weld) return say('This part is welded into one outline. Untick Weld (selected part panel), then press Ungroup.');
     return say(lines.length > 1 && lines.every((l) => l.kind === 'engrave')
-      ? 'This is already one piece: one engraved shape, and the shapes inside it are holes in its fill, so they stay with it.'
+      ? 'This is one engraved shape, and the shapes inside it are holes in its fill. To pull the holes out anyway, right-click → Ungroup all the way (each hole will then engrave solid).'
       : 'This file is already one piece.');
   }
   if (parts.length - 1 + pieces.length > MAX_PARTS) return say(`Cannot ungroup: this file splits into ${pieces.length} pieces, and one design can hold ${MAX_PARTS} parts. Delete other parts first, or split it in AutoCAD or LightBurn.`);
@@ -935,7 +936,11 @@ function ungroup(depth: UngroupDepth = 'level'): void {
   // nothing selected afterwards: with every piece selected they move as one and look still grouped
   select(null);
   changed();
-  warn(depth === 'level' && pieces.some((pc) => pc.lines.length > 1)
+  // one engraved shape broken apart (see splitPieces 'all'): its holes are now filled pieces of their own
+  const holesOut = depth === 'all' && lines.every((l) => l.kind === 'engrave') && splitPieces(lines, 'level').length < 2;
+  warn(holesOut
+    ? `Split into ${made.length} pieces. The holes are pieces of their own now, so they engrave solid. Delete the ones you do not want, or Undo.`
+    : depth === 'level' && pieces.some((pc) => pc.lines.length > 1)
     ? `Split into ${made.length} pieces, each with what is inside it. Ungroup a piece again to take it apart further, or right-click → Ungroup all the way.`
     : `Split into ${made.length} pieces. Click a piece to move or delete it on its own.`, '✓');
 }
@@ -961,9 +966,10 @@ function showPiecesNow(old: ProcessResponse, made: DesignPart[], pieces: Piece[]
     if (k !== undefined) {
       const pc = pieces[k];
       for (const kind of RUN_ORDER) {
-        const paths = pc.lines.filter((l) => l.kind === kind).map((l) => l.pts);
+        const mine = pc.lines.filter((l) => l.kind === kind);
+        const paths = mine.map((l) => l.pts);
         if (paths.length) {
-          next.preview.push({ kind, part: n, paths });
+          next.preview.push(kind === 'engrave' ? { kind, part: n, paths, groups: mine.map((l) => l.group ?? -1) } : { kind, part: n, paths });
           next.partColors!.push({ part: n, key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind });
         }
       }
@@ -995,7 +1001,7 @@ function trimPlan(mx: number, my: number, tol: number): TrimPlan | null {
   views.forEach((v, k) => {
     const b = v.box;
     if (!b || mx < b[0] - tol || mx > b[2] + tol || my < b[1] - tol || my > b[3] + tol) return;
-    const lines = v.layers.flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts })));
+    const lines = v.layers.flatMap((l) => l.paths.map((pts, j) => ({ kind: l.kind, pts, group: l.groups?.[j] })));
     const hit = nearestShown(lines, [mx, my], tol, hiddenOps);
     if (hit && (!best || hit.d <= best.hit.d)) best = { k, lines, hit };
   });
@@ -1064,7 +1070,10 @@ function bakeLines(p: DesignPart, lines: TrimLine[], tag: string): void {
   dropLocal(p.id);
   const kinds = RUN_ORDER.filter((kind) => lines.some((l) => l.kind === kind));
   setKnownColors(data, kinds.map((kind) => ({ key: kind === 'engrave' ? 'fill:#0000ff' : `stroke:${kind === 'cut' ? '#000000' : '#ff0000'}`, kind })));
-  const layers = kinds.map((kind) => ({ kind, paths: lines.filter((l) => l.kind === kind).map((l) => l.pts) }));
+  const layers = kinds.map((kind) => {
+    const mine = lines.filter((l) => l.kind === kind);
+    return kind === 'engrave' ? { kind, paths: mine.map((l) => l.pts), groups: mine.map((l) => l.group ?? -1) } : { kind, paths: mine.map((l) => l.pts) };
+  });
   const i = resultIds.indexOf(p.id);
   if (result && i >= 0) { // show it at once; the server's answer replaces it
     result.preview = [...result.preview.filter((l) => l.part !== i), ...layers.map((l) => ({ ...l, part: i }))];
@@ -1120,7 +1129,7 @@ function rotateBy(deg: number): void {
     return warn(getPhrase() ? 'Wait a moment for the laser lines, then rotate again.' : 'Turning by any angle works on the laser lines. Enter the class phrase first, or use 90°, 180° or 270°.');
   }
   for (const [k, p] of ps.entries()) {
-    const lines = views[k].layers.flatMap((l) => l.paths.map((pts) => ({ kind: l.kind, pts: pts.map(spin) })));
+    const lines = views[k].layers.flatMap((l) => l.paths.map((pts, j) => ({ kind: l.kind, pts: pts.map(spin), group: l.groups?.[j] })));
     bakeLines(p, lines, '(rotated)');
   }
   changed({ exact: true });

@@ -29,7 +29,7 @@ export type Sketch = { rot: number; flipX?: boolean; flipY?: boolean } & (
 export interface PartView {
   id: number;
   box: Box | null;
-  layers: { kind: OpKind; paths: [number, number][][] }[];
+  layers: { kind: OpKind; paths: [number, number][][]; groups?: number[] }[]; // groups: engrave fill group per path
   /** Lines waiting for the student to choose what their colour does (drawn grey, dashed). */
   unassigned?: [number, number][][];
   sketch?: Sketch;
@@ -861,7 +861,17 @@ export class Workspace {
       for (const path of layer.paths) path.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
       if (layer.kind === 'engrave') {
         g.fillStyle = 'rgba(37,99,235,0.5)';
-        g.fill('evenodd');
+        const gs = layer.groups;
+        if (gs && gs.length === layer.paths.length && gs.some((v) => v !== gs[0])) {
+          // even-odd inside each fill group only, like the laser: separate shapes on top of each other stay filled
+          const fills = new Map<number, Path2D>();
+          layer.paths.forEach((path, k) => {
+            let f = fills.get(gs[k]);
+            if (!f) fills.set(gs[k], f = new Path2D());
+            path.forEach(([x, y], i) => (i ? f!.lineTo(X(x), Y(y)) : f!.moveTo(X(x), Y(y))));
+          });
+          for (const f of fills.values()) g.fill(f, 'evenodd');
+        } else g.fill('evenodd');
         g.strokeStyle = OP_COLORS.engrave;
         g.lineWidth = 0.75;
         g.stroke();

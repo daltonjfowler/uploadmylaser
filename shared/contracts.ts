@@ -99,7 +99,9 @@ export interface ProcessRequest {
   laserFile?: boolean;
 }
 
-export interface PreviewLayer { kind: OpKind; part: number; paths: [Mm, Mm][][] }
+/** `groups` (engrave only): each path's fill group. Holes are even-odd inside one group; different groups are
+ *  filled on top of each other (separate SVG shapes). Ungroup needs it to know what is really a hole. */
+export interface PreviewLayer { kind: OpKind; part: number; paths: [Mm, Mm][][]; groups?: number[] }
 export interface PartPaths { part: number; paths: [Mm, Mm][][] }
 /** A colour found in a part, and what the file itself makes it (null: the student has to choose). */
 export interface PartColor { part: number; key: string; kind: OpKind | null }

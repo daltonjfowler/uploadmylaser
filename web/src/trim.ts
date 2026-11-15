@@ -4,7 +4,7 @@
 import type { OpKind } from '../../shared/contracts';
 
 export type Pt = [number, number];
-export interface TrimLine { kind: OpKind; pts: Pt[] }
+export interface TrimLine { kind: OpKind; pts: Pt[]; group?: number } // group: engrave fill group (ungroup.ts Line)
 /** Where a click landed: which line, which segment of it, and how far along (0..1). */
 export interface TrimHit { line: number; seg: number; t: number; d: number }
 
@@ -133,6 +133,6 @@ export function trim(lines: TrimLine[], hit: TrimHit, cutters: Pt[][]): { keep: 
     if (lo > 0) parts.push(piece(pts, 0, lo));
     if (hi < n) parts.push(piece(pts, hi, n));
   }
-  const keep = [...others, ...parts.filter((p) => length(p) > 0.01).map((p) => ({ kind: l.kind, pts: p }))];
+  const keep = [...others, ...parts.filter((p) => length(p) > 0.01).map((p) => (l.group === undefined ? { kind: l.kind, pts: p } : { kind: l.kind, pts: p, group: l.group }))];
   return { keep, removed };
 }

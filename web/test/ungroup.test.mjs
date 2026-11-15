@@ -121,6 +121,41 @@ test('an engraved board: its holes stay, but the art inside the holes comes apar
   assert.equal(splitPieces(lines, 'all').length, 7);
 });
 
+// ---------- fill groups (Dalton 2026-11-14: Ungroup still said "one piece") ----------
+
+test('separate SVG shapes engraved on top of a filled background are not its holes', () => {
+  // background rect (group 0) with three engraved shapes drawn over it (groups 1-3): the laser fills all four
+  const lines = [{ kind: 'engrave', pts: rect(0, 0, 200, 100), group: 0 }];
+  for (let c = 0; c < 3; c++) lines.push({ kind: 'engrave', pts: rect(10 + c * 60, 10, 40, 40), group: c + 1 });
+  assert.equal(splitPieces(lines, 'level').length, 4);
+  assert.equal(splitPieces(lines, 'all').length, 4);
+});
+
+test('a hole in the same fill group still stays with its shape', () => {
+  const lines = [{ kind: 'engrave', pts: rect(0, 0, 30, 30), group: 5 }, { kind: 'engrave', pts: rect(10, 10, 10, 10), group: 5 }];
+  assert.equal(splitPieces(lines, 'level').length, 1);
+});
+
+test('all the way breaks one engraved shape apart, holes too', () => {
+  const lines = [{ kind: 'engrave', pts: rect(0, 0, 100, 100) }];
+  for (let c = 0; c < 4; c++) lines.push({ kind: 'engrave', pts: rect(5 + c * 24, 40, 20, 20) });
+  assert.equal(splitPieces(lines, 'level').length, 1);
+  assert.equal(splitPieces(lines, 'all').length, 5);
+});
+
+test('a piece keeps one engrave path per fill group, so overlapping shapes stay filled', () => {
+  const svg = pieceSvg({
+    lines: [
+      { kind: 'engrave', pts: rect(0, 0, 30, 30), group: 1 },
+      { kind: 'engrave', pts: rect(10, 10, 10, 10), group: 2 },
+      { kind: 'engrave', pts: rect(12, 12, 2, 2), group: 2 },
+    ],
+    box: [0, 0, 30, 30],
+  });
+  const paths = svg.match(/<path [^>]*fill="#0000ff"/g) ?? [];
+  assert.equal(paths.length, 2);
+});
+
 test('one layer on a big floor plan of thousands of shapes is quick', () => {
   const lines = [{ kind: 'cut', pts: rect(0, 0, 1000, 1000) }];
   for (let i = 0; i < 60; i++) for (let j = 0; j < 60; j++) lines.push({ kind: 'engrave', pts: rect(5 + i * 16, 5 + j * 16, 10, 10) });

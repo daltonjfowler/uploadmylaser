@@ -213,6 +213,22 @@ def test_two_parts_keep_engrave_fills_separate(monkeypatch):
     assert [(p.kind, p.part) for p in res.preview] == [("engrave", 0), ("engrave", 1)]
 
 
+def test_engrave_preview_names_each_paths_fill_group():
+    """Ungroup (web/src/ungroup.ts) needs it: shapes drawn over a filled background are not its holes."""
+    svg = b"""<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="30mm" viewBox="0 0 60 30">
+      <rect x="0" y="0" width="60" height="30" fill="#0000ff"/>
+      <rect x="5" y="5" width="10" height="10" fill="#0000ff"/>
+      <path d="M30 5 H50 V25 H30 Z M35 10 H45 V20 H35 Z" fill="#0000ff" fill-rule="evenodd"/></svg>"""
+    for laser_file in (True, False):
+        res = process(job(svg, laser_file=laser_file))
+        assert res.errors == [], res.errors
+        (eng,) = [p for p in res.preview if p.kind == "engrave"]
+        assert len(eng.groups) == len(eng.paths) == 4
+        assert len(set(eng.groups)) == 3  # background, small square, the framed square and its own hole together
+    cut = next(p for p in process(job()).preview if p.kind == "cut")
+    assert cut.groups is None
+
+
 def test_preview_is_per_part_in_run_order():
     res = process(multi(SVG, square(10), at=[(70, 20), (100, 20)]))
     assert res.errors == [], res.errors

@@ -121,6 +121,7 @@ class PreviewLayer(_Camel):
     kind: OpKind
     part: int
     paths: list[list[tuple[float, float]]]
+    groups: Optional[list[int]] = None  # engrave: each path's fill group (Ungroup tells holes from shapes on top)
 
 
 class PartPaths(_Camel):
