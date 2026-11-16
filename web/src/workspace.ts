@@ -380,11 +380,15 @@ export class Workspace {
    * often the wrong part (Dalton 2026-10-05: small objects inside a floor plan could not be picked). Order:
    * the part with a line under the pointer, then the part already selected (so dragging it still works),
    * then the smallest box under the pointer.
+   * A part with other parts inside its box (a frame around things) is hollow (Dalton 2026-11-16: the empty
+   * space inside a rectangle grabbed the rectangle). It is grabbed only by its lines or an engraved fill, so
+   * empty space there starts a selection box. The selected part gets no exception: a hollow frame is moved by
+   * its line, its move grip or the arrow keys.
    */
   private partAt(mx: number, my: number): PartView | undefined {
     const pad = 3 / this.view.s; // thin designs are still easy to grab
     const under = this.parts.filter(({ box: b }) => b && mx >= b[0] - pad && mx <= b[2] + pad && my >= b[1] - pad && my <= b[3] + pad);
-    if (under.length <= 1) return under[0];
+    if (!under.length) return undefined;
     let best: PartView | undefined;
     let bestD = (6 + this.touchSlop) / this.view.s;
     for (let i = under.length - 1; i >= 0; i--) { // topmost first, so it wins a tie
@@ -392,10 +396,19 @@ export class Workspace {
       if (d < bestD) [best, bestD] = [under[i], d];
     }
     if (best) return best;
-    const sel = under.find((p) => p.id === this.selected || this.inGroup.has(p.id));
+    const solid = under.filter((p) => !this.hollow(p) || insideFill(p, mx, my));
+    if (!solid.length) return undefined;
+    const sel = solid.find((p) => p.id === this.selected || this.inGroup.has(p.id));
     if (sel) return sel;
     const area = (p: PartView) => (p.box![2] - p.box![0]) * (p.box![3] - p.box![1]);
-    return under.reduce((a, b) => (area(b) <= area(a) ? b : a));
+    return solid.reduce((a, b) => (area(b) <= area(a) ? b : a));
+  }
+
+  /** Another part sits wholly inside this part's box, and this part has real lines to grab it by. */
+  private hollow(p: PartView): boolean {
+    const b = p.box;
+    if (!b || !p.layers.some((l) => l.paths.length)) return false; // a sketch or picture: its box is all there is
+    return this.parts.some((q) => q !== p && q.box && q.box[0] >= b[0] && q.box[1] >= b[1] && q.box[2] <= b[2] && q.box[3] <= b[3]);
   }
 
   private down = (e: PointerEvent) => {
@@ -1160,6 +1173,26 @@ function line(g: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y
 }
 
 /** How close (bed mm) the point is to any of the part's lines, giving up at `limit`. */
+/** Inside an engraved (filled) area of the part: even-odd within each fill group, like the drawing. */
+function insideFill(p: PartView, x: number, y: number): boolean {
+  for (const l of p.layers) {
+    if (l.kind !== 'engrave') continue;
+    const hits = new Map<number, boolean>();
+    l.paths.forEach((path, k) => {
+      if (path.length < 3) return;
+      let hit = false;
+      for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+        const [xi, yi] = path[i];
+        const [xj, yj] = path[j];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit;
+      }
+      if (hit) { const g = l.groups?.[k] ?? -1; hits.set(g, !hits.get(g)); }
+    });
+    for (const v of hits.values()) if (v) return true;
+  }
+  return false;
+}
+
 function lineDistance(p: PartView, x: number, y: number, limit: number): number {
   let best = limit;
   for (const path of [...p.layers.flatMap((l) => l.paths), ...(p.unassigned ?? [])]) {
