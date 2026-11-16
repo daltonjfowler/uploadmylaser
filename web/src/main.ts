@@ -76,6 +76,7 @@ const ws = new Workspace($<HTMLCanvasElement>('ws'), {
   onToggle: (id) => toggleSelect(id),
   onMove: (ids, dx, dy) => moveParts(ids, dx, dy),
   onResize: (ids, fx, fy, from, to) => resizeParts(ids, fx, fy, from, to),
+  onRotate: (deg) => rotateBy(deg), // the rotate handle (Dalton 2026-11-16: free rotate)
   isLocked: () => locked,
   onDimClick: (which, at, mm) => openDimEdit(which, at, mm),
   onDrawn: (tool, pts, closed) => {

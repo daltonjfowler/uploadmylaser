@@ -5,6 +5,7 @@ import type { OpKind } from '../../shared/contracts';
 import { OP_COLORS, UNSURE } from './ops';
 import { LINE_GAP } from './sketch';
 import { smoothD } from './library';
+import { rotateAngle } from './rotate';
 import { isDark, onThemeChange } from './theme';
 
 // The bed stays a light "material" colour in dark mode too, so black Cut through lines stay visible; around
@@ -43,6 +44,8 @@ export interface WorkspaceEvents {
   onMove(ids: number[], dxMm: number, dyMm: number): void;
   /** Resized by a handle. fx/fy are screen-axis factors; `to` is the new box. */
   onResize(ids: number[], fx: number, fy: number, from: Box, to: Box): void;
+  /** The rotate handle was dragged: turn the selection by `deg` (+ is counter-clockwise) around its middle. */
+  onRotate(deg: number): void;
   /** The lock button: resize keeps the shape unless it's off (Shift flips it while dragging). */
   isLocked(): boolean;
   /** A size label on the selection was clicked: `at` is where it sits (css px in the canvas), `mm` its value. */
@@ -76,6 +79,8 @@ const CURSORS: Record<Handle, string> = { nw: 'nwse-resize', se: 'nwse-resize', 
 const RULER = 22; // css px
 const HANDLE = 10; // css px, drawn size of a resize square
 const GRIP = 12; // css px, radius of the move grip under the selection
+const ROT = 9; // css px, radius of the rotate handle off the selection's top-right corner
+const ROT_OFF = 18; // css px from that corner (the width label sits above the middle)
 
 export class Workspace {
   private g: CanvasRenderingContext2D;
@@ -99,6 +104,7 @@ export class Workspace {
   private gesture:
     | { kind: 'move'; ids: number[]; box: Box; startX: number; startY: number }
     | { kind: 'resize'; ids: number[]; box: Box; handle: Handle }
+    | { kind: 'rotate'; ids: number[]; box: Box; cx: number; cy: number; a0: number; deg: number }
     | { kind: 'pan'; startX: number; startY: number; ox: number; oy: number }
     | { kind: 'pinch'; d0: number; mx: number; my: number; s0: number }
     | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
@@ -338,7 +344,7 @@ export class Workspace {
   }
 
   /** Screen positions of the selected part's handles and move grip. */
-  private handlePoints(): { pts: Record<Handle, [number, number]>; grip: [number, number]; small: boolean; group: boolean } | null {
+  private handlePoints(): { pts: Record<Handle, [number, number]>; grip: [number, number]; rot: [number, number]; small: boolean; group: boolean } | null {
     const group = this.group.length > 1;
     const b = group ? this.groupBox(true) : (() => { const p = this.parts.find((x) => x.id === this.selected); return p ? this.liveBox(p) : null; })();
     if (!b) return null;
@@ -352,6 +358,7 @@ export class Workspace {
     return {
       pts: { nw: [x0, y0], n: [cx, y0], ne: [x1, y0], e: [x1, cy], se: [x1, y1], s: [cx, y1], sw: [x0, y1], w: [x0, cy] },
       grip: [cx, y1 + GRIP + 12],
+      rot: [x1 + ROT_OFF, y0 - ROT_OFF],
       small: x1 - x0 < 40 || y1 - y0 < 40, // edge squares hide on tiny parts so the corners stay grabbable
       group,
     };
@@ -362,11 +369,12 @@ export class Workspace {
     return union(this.parts.filter((p) => this.inGroup.has(p.id)).map((p) => (live ? this.liveBox(p) : p.box)));
   }
 
-  private hit(x: number, y: number): Handle | 'grip' | null {
+  private hit(x: number, y: number): Handle | 'grip' | 'rot' | null {
     const hp = this.handlePoints();
     if (!hp) return null;
     const r = HANDLE / 2 + 3 + this.touchSlop;
     if (Math.hypot(x - hp.grip[0], y - hp.grip[1]) <= GRIP + 3 + this.touchSlop) return 'grip';
+    if (this.tool === 'select' && Math.hypot(x - hp.rot[0], y - hp.rot[1]) <= ROT + 3 + this.touchSlop) return 'rot';
     for (const h of HANDLES) {
       if (hp.small && h.length === 1) continue;
       const [hx, hy] = hp.pts[h];
@@ -464,6 +472,14 @@ export class Workspace {
     const sel = this.parts.find((x) => x.id === this.selected);
     const gbox = this.group.length > 1 ? this.groupBox(false) : null;
     const h = e.button === 0 ? this.hit(p.x, p.y) : null;
+    if (h === 'rot') {
+      const box = gbox ?? sel?.box;
+      if (!box) return;
+      const [cx, cy] = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+      this.gesture = { kind: 'rotate', ids: gbox ? [...this.group] : [sel!.id], box, cx, cy, a0: Math.atan2(p.my - cy, p.mx - cx), deg: 0 };
+      this.canvas.style.cursor = 'grabbing';
+      return;
+    }
     if (h === 'grip' && gbox) {
       this.gesture = { kind: 'move', ids: [...this.group], box: gbox, startX: p.mx, startY: p.my };
       return;
@@ -538,7 +554,12 @@ export class Workspace {
     }
     if (!gs) {
       const h = this.hit(p.x, p.y);
-      this.canvas.style.cursor = this.dimAt(p.x, p.y) ? 'text' : h === 'grip' ? 'move' : h ? CURSORS[h] : this.partAt(p.mx, p.my) ? 'move' : 'grab';
+      this.canvas.style.cursor = this.dimAt(p.x, p.y) ? 'text' : h === 'grip' ? 'move' : h === 'rot' ? 'grab' : h ? CURSORS[h] : this.partAt(p.mx, p.my) ? 'move' : 'grab';
+      return;
+    }
+    if (gs.kind === 'rotate') {
+      gs.deg = rotateAngle(gs.a0, Math.atan2(p.my - gs.cy, p.mx - gs.cx), e.shiftKey);
+      this.draw();
       return;
     }
     if (gs.kind === 'pinch') {
@@ -589,6 +610,11 @@ export class Workspace {
     this.gesture = null;
     if (gs?.kind === 'box') {
       this.finishBox(gs);
+      return;
+    }
+    if (gs?.kind === 'rotate') {
+      if (gs.deg) this.ev.onRotate(gs.deg);
+      this.draw();
       return;
     }
     if (!gs || gs.kind === 'pan' || !lv) {
@@ -708,8 +734,18 @@ export class Workspace {
       g.restore();
     }
 
-    // parts
-    for (const p of this.parts) this.drawPart(p);
+    // parts (a free rotate in progress draws the selection turned about its middle)
+    const rot = this.gesture?.kind === 'rotate' && this.gesture.deg ? this.gesture : null;
+    const turning = rot ? new Set(rot.ids) : null;
+    for (const p of this.parts) {
+      if (!rot || !turning!.has(p.id)) { this.drawPart(p); continue; }
+      g.save();
+      g.translate(ox + rot.cx * s, oy + rot.cy * s);
+      g.rotate((-rot.deg * Math.PI) / 180);
+      g.translate(-(ox + rot.cx * s), -(oy + rot.cy * s));
+      this.drawPart(p);
+      g.restore();
+    }
 
     // whole-job box and the laser head dot
     const jb = this.liveJobBox();
@@ -914,6 +950,8 @@ export class Workspace {
     const hp = this.handlePoints();
     if (!hp) return;
     const g = this.g;
+    const gs = this.gesture;
+    if (gs?.kind === 'rotate') return this.drawTurning(gs);
     const { nw, se } = hp.pts;
     g.setLineDash([4, 3]);
     g.strokeStyle = SEL;
@@ -963,7 +1001,59 @@ export class Workspace {
       g.lineTo(ax + dx * 3 - dy * 3, ay + dy * 3 - dx * 3);
     }
     g.stroke();
+    if (this.tool === 'select') this.drawRotateHandle(hp.rot, hp.pts.ne);
     this.drawDims(hp);
+  }
+
+  /** A round "turn me" spot off the top-right corner, with a curved arrow, tied to the corner by a thin line. */
+  private drawRotateHandle([rx, ry]: [number, number], [nx, ny]: [number, number]): void {
+    const g = this.g;
+    g.beginPath();
+    g.moveTo(nx + HANDLE / 2, ny - HANDLE / 2);
+    g.lineTo(rx - ROT * 0.7, ry + ROT * 0.7);
+    g.strokeStyle = SEL;
+    g.lineWidth = 1.5;
+    g.stroke();
+    g.beginPath();
+    g.arc(rx, ry, ROT, 0, Math.PI * 2);
+    g.fillStyle = SEL;
+    g.fill();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.arc(rx, ry, ROT - 4, -Math.PI * 0.85, Math.PI * 0.45);
+    g.stroke();
+    // arrow head at the end of the arc
+    const ea = Math.PI * 0.45;
+    const [ex, ey] = [rx + (ROT - 4) * Math.cos(ea), ry + (ROT - 4) * Math.sin(ea)];
+    g.beginPath();
+    g.moveTo(ex - 3.5, ey - 0.5);
+    g.lineTo(ex, ey);
+    g.lineTo(ex + 0.5, ey - 3.5);
+    g.stroke();
+  }
+
+  /** While the rotate handle is dragged: the selection's box turned with it, and the angle. */
+  private drawTurning(gs: { box: Box; cx: number; cy: number; deg: number }): void {
+    const g = this.g;
+    const { s, ox, oy } = this.view;
+    const [cx, cy] = [ox + gs.cx * s, oy + gs.cy * s];
+    const [w, h] = [(gs.box[2] - gs.box[0]) * s + 8, (gs.box[3] - gs.box[1]) * s + 8];
+    g.save();
+    g.translate(cx, cy);
+    g.rotate((-gs.deg * Math.PI) / 180);
+    g.setLineDash([4, 3]);
+    g.strokeStyle = SEL;
+    g.lineWidth = 1;
+    g.strokeRect(-w / 2, -h / 2, w, h);
+    g.restore();
+    g.beginPath();
+    g.arc(cx, cy, 3, 0, Math.PI * 2);
+    g.fillStyle = SEL;
+    g.fill();
+    const label = `${gs.deg > 0 ? '⟲' : gs.deg < 0 ? '⟳' : ''} ${Math.abs(gs.deg)}°`.trim();
+    this.dimLabel('w', label, 0, cx, Math.max(cy - h / 2 - 22, RULER + 12));
+    this.dims = []; // shown only, not a field to click
   }
 
   /** Clickable size labels: width above the selection, height to its left. A circle shows its
