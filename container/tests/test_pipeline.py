@@ -321,6 +321,22 @@ def test_weld_merges_overlapping_same_colour_shapes():
     assert len([it for it in out if it.closed]) == 1 and len([it for it in out if not it.closed]) == 1
 
 
+def test_weld_leaves_touching_tiles_and_drawn_holes_alone():
+    """Dalton 2026-11-17: weld is on for every opened file, so it may only merge shapes that partly overlap."""
+    from app.geometry import Item
+    from app.geometry.shapes_ops import weld
+    from shapely.geometry import Polygon
+    sq = lambda x, y, s, g: Item("k", "cut", [(x, y), (x + s, y), (x + s, y + s), (x, y + s), (x, y)], True, g)
+    tiles = [sq(0, 0, 10, 1), sq(10, 0, 10, 2), sq(0, 10, 10, 3), sq(10, 10, 10, 4)]  # a 2 x 2 board grid
+    assert len(weld(tiles)) == 4  # every tile still cuts out
+    keyring = [sq(0, 0, 40, 1), sq(5, 5, 6, 2)]  # a tag and its hole, drawn as two separate shapes
+    out = weld(keyring)
+    assert len(out) == 2 and sorted(round(Polygon(i.pts).area) for i in out) == [36, 1600]
+    overlap = [sq(0, 0, 10, 1), sq(5, 5, 10, 2), sq(30, 0, 5, 3)]  # joined-up letters, and one apart
+    out = weld(overlap)
+    assert len(out) == 2 and sorted(round(Polygon(i.pts).area) for i in out) == [25, 175]
+
+
 def test_weld_keeps_letter_holes():
     from app.geometry import Item
     from app.geometry.shapes_ops import weld

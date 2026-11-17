@@ -294,13 +294,13 @@ function newSpot(): { xMm: number; yMm: number } {
   return { xMm: machine.bedWidthMm - 10, yMm: round((unionBox(boxes)?.[3] ?? 0) + 10) };
 }
 
-function addPart(source: Source, at?: { xMm: number; yMm: number }): void {
+function addPart(source: Source, at?: { xMm: number; yMm: number }, extra?: Partial<DesignPart>): void {
   if (parts.length >= MAX_PARTS) {
     notes = [`That's the most parts one design can have (${MAX_PARTS}).`];
     render();
     return;
   }
-  const p: DesignPart = { id: nextId++, source, ...(at ?? newSpot()), scale: 1, rotateDeg: 0 };
+  const p: DesignPart = { id: nextId++, source, ...(at ?? newSpot()), scale: 1, rotateDeg: 0, ...extra };
   parts.push(p);
   select(p.id);
   changed();
@@ -748,9 +748,12 @@ async function openAny(f: File, replace: boolean): Promise<void> {
     result = null;
     resultIds = [];
   }
-  addPart(src);
+  // Both welds start on for a drawing file (Dalton 2026-11-17): open ends up to 1 mm close, and shapes that
+  // partly overlap merge (touching tiles and drawn holes stay apart, container shapes_ops.weld).
+  const drawing = src.kind === 'file' && src.fileType !== 'pbm';
+  addPart(src, undefined, drawing ? { weld: true, closeGaps: true } : undefined);
   const added = parts[parts.length - 1];
-  if (added?.source === src && src.kind === 'file' && src.fileType !== 'pbm') freshFiles.add(added.id);
+  if (added?.source === src && drawing) freshFiles.add(added.id);
 }
 
 $('open').onclick = () => {
@@ -1297,6 +1300,7 @@ function renderSizebar(): void {
   $('lenField').hidden = !isLine;
   $('angField').hidden = !isLine;
   renderLock();
+  renderWeld();
   if (gb) {
     // a group: the box around all of it. Typing a size scales the lot; X/Y moves it.
     setIfIdle('selX', toU(flipX((gb[0] + gb[2]) / 2)));
@@ -1331,6 +1335,35 @@ function renderSizebar(): void {
     fontSel.style.fontFamily = TEXT_FONTS.find((f) => f.id === t.font)?.css ?? '';
   }
 }
+
+/** The Weld button (Dalton 2026-11-17: "a clear button you can turn on and off"): both welds together, for
+ *  everything selected. On when every selected part has both, Off when none has either, Some otherwise. */
+function weldState(): 'on' | 'off' | 'some' {
+  const ps = selection().map(find).filter((q): q is DesignPart => !!q);
+  if (ps.length && ps.every((q) => q.weld && q.closeGaps)) return 'on';
+  if (ps.every((q) => !q.weld && !q.closeGaps)) return 'off';
+  return 'some';
+}
+
+function renderWeld(): void {
+  const s = weldState();
+  const b = $('weldBtn');
+  b.textContent = s === 'on' ? '🔗 Weld: On' : s === 'off' ? '🔗 Weld: Off' : '🔗 Weld: Some';
+  b.setAttribute('aria-pressed', s === 'on' ? 'true' : s === 'off' ? 'false' : 'mixed');
+}
+
+$('weldBtn').onclick = () => {
+  const on = weldState() !== 'on'; // Off or Some: turn it on for all; On: turn it off
+  for (const id of selection()) {
+    const q = find(id);
+    if (!q) continue;
+    if (on) Object.assign(q, { weld: true, closeGaps: true });
+    else { delete q.weld; delete q.closeGaps; }
+  }
+  changed();
+  renderPartPanel();
+  renderSizebar();
+};
 
 function renderLock(): void {
   const lockBtn = $('lock');

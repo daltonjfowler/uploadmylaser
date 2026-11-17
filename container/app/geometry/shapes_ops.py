@@ -70,9 +70,26 @@ def join_touching(items: list[Item]) -> list[Item]:
     return out
 
 
+WELD_MIN_OVERLAP_MM2 = 0.01  # shapes must share at least this much area to be welded
+
+
+def _partly_overlap(a: Polygon, b: Polygon) -> bool:
+    """Shapes that share area, where neither lies wholly inside the other: joined-up letters, overlapping stars.
+    Shapes that only touch (tiles in a grid) or that sit inside another (a hole drawn as its own circle) are
+    not welded (Dalton 2026-11-17: weld is now on for every opened file, so it must never eat a grid or a hole)."""
+    if not a.intersects(b):
+        return False
+    shared = a.intersection(b).area
+    return WELD_MIN_OVERLAP_MM2 < shared < min(a.area, b.area) - WELD_MIN_OVERLAP_MM2
+
+
 def weld(items: list[Item]) -> list[Item]:
-    """Closed shapes of the same colour and job become their merged outline. Open lines stay as they are.
-    Touching loose lines are joined first, so exploded text welds without OVERKILL."""
+    """Closed shapes of the same colour and job that partly overlap become their merged outline. Open lines stay
+    as they are. Touching loose lines are joined first, so exploded text welds without OVERKILL."""
+    from shapely import STRtree
+
+    from .areas import polygons_of
+
     items = join_touching(items)
     out = [it for it in items if not it.closed]
     groups: dict[tuple[str, object], list[Item]] = {}
@@ -80,12 +97,38 @@ def weld(items: list[Item]) -> list[Item]:
         if it.closed:
             groups.setdefault((it.key, it.kind), []).append(it)
     for (key, kind), its in groups.items():
-        merged = unary_union(_rings_to_polygons(its))
-        group = its[0].group
-        for poly in _polygons(merged):
-            out.append(Item(key, kind, _ring(poly.exterior.coords), True, group))
-            for hole in poly.interiors:
-                out.append(Item(key, kind, _ring(hole.coords), True, group))
+        # one shape per area: even-odd inside each fill group (a letter keeps its holes), then split apart
+        by_group: dict[object, list[Item]] = {}
+        for it in its:
+            by_group.setdefault(it.group, []).append(it)
+        shapes: list[tuple[Polygon, object]] = []
+        for group, gits in by_group.items():
+            for g in _rings_to_polygons(gits):
+                shapes += [(p, group) for p in polygons_of(g) if p.area > 0]
+        parent = list(range(len(shapes)))
+
+        def root(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        tree = STRtree([p for p, _ in shapes])
+        for i, (p, _) in enumerate(shapes):
+            for j in tree.query(p):
+                j = int(j)
+                if j > i and root(i) != root(j) and _partly_overlap(p, shapes[j][0]):
+                    parent[root(j)] = root(i)
+        clusters: dict[int, list[int]] = {}
+        for i in range(len(shapes)):
+            clusters.setdefault(root(i), []).append(i)
+        for members in clusters.values():
+            group = shapes[members[0]][1]
+            merged = unary_union([shapes[i][0] for i in members]) if len(members) > 1 else shapes[members[0]][0]
+            for poly in _polygons(merged):
+                out.append(Item(key, kind, _ring(poly.exterior.coords), True, group))
+                for hole in poly.interiors:
+                    out.append(Item(key, kind, _ring(hole.coords), True, group))
     return out
 
 

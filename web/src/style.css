@@ -224,6 +224,11 @@ body.display #net { position: fixed; right: 12px; bottom: 8px; margin: 0; color:
 
 .lockbtn { padding: 2px 8px; font-size: 1rem; }
 .lockbtn[aria-pressed="false"] { background: transparent; border-style: dashed; }
+/* Weld on/off (Dalton 2026-11-17): plainly lit when on, dashed and dim when off */
+.weldbtn { padding: 2px 10px; font-weight: 600; white-space: nowrap; }
+.weldbtn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.weldbtn[aria-pressed="false"] { background: transparent; border-style: dashed; opacity: .8; }
+.weldbtn[aria-pressed="mixed"] { background: transparent; border-color: var(--accent); }
 .sizebar #pctBox { display: inline-flex; gap: 6px; align-items: center; }
 .sizebar #pctBox[hidden] { display: none; }
 
