@@ -2498,8 +2498,12 @@ function weldOffer(): HTMLElement[] {
   const todo = open.filter((q) => !q.closeGaps);
   const li = document.createElement('li');
   li.className = 'warn';
+  // Fill area closes what Weld can't: a shape whose lines only meet another shape (Dalton 2026-11-17, the rocket)
+  const fill = Object.assign(document.createElement('button'), { type: 'button', className: 'small', textContent: '🪣 Fill area' });
+  fill.dataset.hint = 'Click inside a shape on the bed to engrave the space its lines close in, even lines that only touch another shape.';
+  fill.onclick = () => setTool('fill');
   if (!todo.length) {
-    li.textContent = 'Some lines still do not close: their gaps are bigger than 1 mm. Close them in your drawing.';
+    li.append('Some shapes still do not close (a gap bigger than 1 mm, or lines that only meet another shape). Click inside them with ', fill, '.');
     return [li];
   }
   const btn = Object.assign(document.createElement('button'), { type: 'button', className: 'small', textContent: 'Weld them closed' });
@@ -2509,7 +2513,7 @@ function weldOffer(): HTMLElement[] {
     changed();
     renderPartPanel();
   };
-  li.append(`${todo.length === 1 ? 'This part has' : `${todo.length} parts have`} shapes that are not closed, so they can't be engraved. `, btn);
+  li.append(`${todo.length === 1 ? 'This part has' : `${todo.length} parts have`} shapes that are not closed, so they can't be engraved. `, btn, ' or ', fill);
   return [li];
 }
 
@@ -2945,9 +2949,11 @@ async function run(laserFile = false): Promise<void> {
     notes = [];
     remember(res, ids, sigs);
     cutUnknownColours(res, ids);
-    // say it once, where the student is looking; the button itself is in the Laser panel
-    if (!hadOpen && res.openEngraveParts?.some((i) => !find(ids[i])?.closeGaps)) {
-      warn('Some shapes are not closed, so they can’t be engraved. Press Weld them closed in the Laser panel.');
+    // say it once, where the student is looking; the buttons themselves are in the Laser panel
+    if (!hadOpen && res.openEngraveParts?.length) {
+      warn(res.openEngraveParts.some((i) => !find(ids[i])?.closeGaps)
+        ? 'Some shapes are not closed, so they can’t be engraved. Press Weld them closed in the Laser panel, or use 🪣 Fill area: click inside the shape.'
+        : 'Some shapes are not closed, so they can’t be engraved (a gap, or lines that only meet another shape). Use 🪣 Fill area: click inside the shape.');
     }
   } catch (e) {
     if (mine !== seq) return;
