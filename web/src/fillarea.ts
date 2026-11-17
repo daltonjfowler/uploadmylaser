@@ -10,6 +10,10 @@ import { area, simplify, traceLoops, type Pt } from './trace';
 
 export const FILL_GRID_PX = 2000; // the grid's long side, in cells
 export const FILL_MIN_MM = 0.02; // finest cell
+/** Lines are drawn at least this wide on the grid, whatever its cell size, so a gap this small between two
+ *  pieces is sealed on the fine grid too (Dalton 2026-11-17: a board's pieces missed each other by 0.04-0.09 mm,
+ *  the fine grid leaked through, and the blocky coarse fill was used instead). */
+export const FILL_SEAL_MM = 0.3;
 const PAD = 3; // empty cells round the window, so a flood that leaks out always reaches the edge
 
 export type FillResult =
@@ -31,17 +35,21 @@ function boundsOf(paths: Pt[][]): Box | null {
 
 interface Flood { loops: Pt[][]; areaMm2: number; box: Box; cell: number }
 
-/** One flood on a grid over `win` (bed mm) with cells of `cell` mm. */
-function flood(paths: Pt[][], at: Pt, win: Box, cell: number): Flood | 'line' | 'open' {
+/** One flood on a grid over `win` (bed mm) with cells of `cell` mm. Exported for tests. */
+export function flood(paths: Pt[][], at: Pt, win: Box, cell: number): Flood | 'line' | 'open' {
   const w = Math.ceil((win[2] - win[0]) / cell) + 1 + 2 * PAD;
   const h = Math.ceil((win[3] - win[1]) / cell) + 1 + 2 * PAD;
   const grid = new Uint8Array(w * h); // 0 empty, 1 line, 2 flooded
   const cx = (x: number) => Math.floor((x - win[0]) / cell) + PAD;
   const cy = (y: number) => Math.floor((y - win[1]) / cell) + PAD;
-  const stamp = (i: number, j: number) => { // a line three cells wide seals hairline gaps
-    for (let b = j - 1; b <= j + 1; b++) {
-      if (b < 0 || b >= h) continue;
-      for (let a = i - 1; a <= i + 1; a++) if (a >= 0 && a < w) grid[b * w + a] = 1;
+  // a line at least three cells and FILL_SEAL_MM wide seals hairline gaps
+  const r = Math.max(1, Math.ceil(FILL_SEAL_MM / 2 / cell));
+  const disc: number[][] = [];
+  for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) if (a * a + b * b <= r * r + r) disc.push([a, b]);
+  const stamp = (i: number, j: number) => {
+    for (const [a, b] of disc) {
+      const x = i + a, y = j + b;
+      if (x >= 0 && x < w && y >= 0 && y < h) grid[y * w + x] = 1;
     }
   };
   const [wx0, wy0, wx1, wy1] = [win[0] - PAD * cell, win[1] - PAD * cell, win[2] + PAD * cell, win[3] + PAD * cell];
@@ -50,7 +58,7 @@ function flood(paths: Pt[][], at: Pt, win: Box, cell: number): Flood | 'line' | 
       const [ax, ay] = p[k];
       const [bx, by] = p[k + 1];
       if (Math.max(ax, bx) < wx0 || Math.min(ax, bx) > wx1 || Math.max(ay, by) < wy0 || Math.min(ay, by) > wy1) continue;
-      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / (cell * 0.5)));
+      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / (cell * Math.max(0.5, r * 0.7))));
       for (let t = 0; t <= n; t++) stamp(cx(ax + ((bx - ax) * t) / n), cy(ay + ((by - ay) * t) / n));
     }
     if (p.length === 1) stamp(cx(p[0][0]), cy(p[0][1]));
@@ -85,13 +93,14 @@ function flood(paths: Pt[][], at: Pt, win: Box, cell: number): Flood | 'line' | 
   // Grow the flood into the line it stopped at, so the fill reaches the middle of that line.
   const ink = new Uint8Array(w * h);
   for (let c = 0; c < ink.length; c++) ink[c] = grid[c] === 2 ? 1 : 0;
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < r + 1; pass++) {
     const grow: number[] = [];
     for (let j = 1; j < h - 1; j++) for (let i = 1; i < w - 1; i++) {
       const c = j * w + i;
       if (!ink[c] && grid[c] === 1 && (ink[c - 1] || ink[c + 1] || ink[c - w] || ink[c + w])) grow.push(c);
     }
     for (const c of grow) ink[c] = 1;
+    count += grow.length;
   }
   const toMm = ([x, y]: Pt): Pt => [
     Math.round((win[0] + (x - PAD) * cell) * 1000) / 1000,
@@ -113,14 +122,24 @@ export function fillArea(paths: Pt[][], at: Pt): FillResult {
   const long = Math.max(all[2] - all[0], all[3] - all[1], FILL_MIN_MM);
   const first = flood(paths, at, all, Math.max(FILL_MIN_MM, long / FILL_GRID_PX));
   if (typeof first === 'string') return { error: first };
-  // A second, finer look at just that area (a small space on a big board would otherwise come out blocky).
+  // A second, finer look at just that area (a small space on a big board would otherwise come out blocky). The
+  // coarse grid's thick lines can close a narrow neck (Dalton 2026-11-17: Saturn's ring, where its two lines come
+  // within a millimetre), so the space may be bigger than it looked: when the fine flood reaches the edge of its
+  // window, the window grows (and its cells with it) until the space fits or the window is the whole drawing.
   const m = 3 * first.cell;
-  const win: Box = [first.box[0] - m, first.box[1] - m, first.box[2] + m, first.box[3] + m];
-  const fine = Math.max(FILL_MIN_MM, Math.max(win[2] - win[0], win[3] - win[1]) / FILL_GRID_PX);
-  if (fine < first.cell * 0.8) {
+  let win: Box = [first.box[0] - m, first.box[1] - m, first.box[2] + m, first.box[3] + m];
+  for (;;) {
+    const fine = Math.max(FILL_MIN_MM, Math.max(win[2] - win[0], win[3] - win[1]) / FILL_GRID_PX);
+    if (fine >= first.cell * 0.8) break;
     const second = flood(paths, at, win, fine);
-    // the finer grid can find a gap the coarse one sealed: then the coarse answer stands
-    if (typeof second !== 'string' && second.loops.length) return { loops: second.loops, areaMm2: second.areaMm2 };
+    if (typeof second !== 'string') {
+      if (second.loops.length) return { loops: second.loops, areaMm2: second.areaMm2 };
+      break;
+    }
+    if (second === 'line') break;
+    if (win[0] <= all[0] && win[1] <= all[1] && win[2] >= all[2] && win[3] >= all[3]) break; // it really leaks
+    const gx = (win[2] - win[0]) / 2, gy = (win[3] - win[1]) / 2;
+    win = [Math.max(all[0], win[0] - gx), Math.max(all[1], win[1] - gy), Math.min(all[2], win[2] + gx), Math.min(all[3], win[3] + gy)];
   }
   return first.loops.length ? { loops: first.loops, areaMm2: first.areaMm2 } : { error: 'line' };
 }

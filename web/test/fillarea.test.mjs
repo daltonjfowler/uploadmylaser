@@ -67,6 +67,29 @@ test('outside the drawing, on a line, or nothing to fill', () => {
   assert.deepEqual(fillArea([], [0, 0]), { error: 'nothing' });
 });
 
+test('a ring that narrows to 0.6 mm on a big board fills all the way round, smoothly (Saturn)', () => {
+  const circle = (cx, cy, r) => Array.from({ length: 361 }, (_, k) => [cx + r * Math.cos((k * Math.PI) / 180), cy + r * Math.sin((k * Math.PI) / 180)]);
+  // outer r 20; inner r 17.7 shifted down: 4 mm of band at the top, 0.6 mm at the bottom
+  const lines = [rect(0, 0, 600, 600), circle(300, 300, 20), circle(300, 301.7, 17.7)];
+  const r = fillArea(lines, [300, 282]);
+  assert.ok('loops' in r, JSON.stringify(r));
+  const want = Math.PI * (20 * 20 - 17.7 * 17.7);
+  assert.ok(Math.abs(r.areaMm2 - want) < want * 0.05, `${r.areaMm2} vs ${want}`);
+  // smooth: every edge point within 0.1 mm of one of the two circles
+  for (const l of r.loops) for (const [x, y] of l) {
+    const d = Math.min(Math.abs(Math.hypot(x - 300, y - 300) - 20), Math.abs(Math.hypot(x - 300, y - 301.7) - 17.7));
+    assert.ok(d < 0.1, `edge point ${x},${y} is ${d} mm off`);
+  }
+});
+
+test('pieces that miss each other by 0.08 mm still fill on the fine grid', () => {
+  const lines = [rect(0, 0, 600, 600), [[100, 100], [130, 100.08]], [[130, 100], [130, 130]], [[130.08, 130], [100, 130]], [[100, 130], [100, 100.08]]];
+  const r = fillArea(lines, [115, 115]);
+  assert.ok('loops' in r);
+  for (const l of r.loops) for (const [x, y] of l) assert.ok(x > 99.8 && x < 130.3 && y > 99.8 && y < 130.3);
+  assert.ok(Math.abs(r.areaMm2 - 900) < 20, String(r.areaMm2));
+});
+
 test('a small space on a big board comes out fine, not blocky (second, finer look)', () => {
   const lines = [rect(0, 0, 1000, 600), rect(500, 300, 4, 4)];
   const r = fillArea(lines, [502, 302]);
