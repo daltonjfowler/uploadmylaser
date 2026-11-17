@@ -60,9 +60,11 @@ export interface WorkspaceEvents {
   trimAt(mx: number, my: number, tolMm: number): [number, number][][] | null;
   /** Trim tool: cut it away. */
   onTrim(mx: number, my: number, tolMm: number): void;
+  /** Fill area tool: a click at (mx, my), bed mm. */
+  onFill(mx: number, my: number): void;
 }
 
-export type Tool = 'select' | 'line' | 'curve' | 'trim';
+export type Tool = 'select' | 'line' | 'curve' | 'trim' | 'fill';
 
 /** A local, not-yet-processed change to one part: its geometry is drawn mapped from `from` onto `to`. */
 interface Live { ids: number[]; has: Set<number>; from: Box; to: Box }
@@ -432,6 +434,10 @@ export class Workspace {
       this.draw();
       return;
     }
+    if (this.tool === 'fill' && e.button === 0) {
+      this.ev.onFill(p.mx, p.my);
+      return;
+    }
     if (this.tool !== 'select' && e.button === 0) {
       const pt = this.toolPoint(p.mx, p.my, e.shiftKey);
       if (this.tool === 'line') {
@@ -547,6 +553,7 @@ export class Workspace {
       this.draw();
       return;
     }
+    if (this.tool === 'fill' && !gs) return;
     if (this.tool !== 'select' && !gs) {
       this.cursor = this.toolPoint(p.mx, p.my, e.shiftKey);
       this.draw();
@@ -801,6 +808,7 @@ export class Workspace {
   private drawDraft(): void {
     if (this.tool === 'select') return;
     if (this.tool === 'trim') return this.drawTrim();
+    if (this.tool === 'fill') return this.drawTip('Fill area: click inside a space that lines close in, to engrave it  ·  Ctrl+Z takes it back  ·  Esc to stop');
     this.drawTip(this.tool === 'line'
       ? 'Click two points, or drag  ·  Type a number for an exact length  ·  Enter or Esc to stop'
       : 'Click to add points  ·  Click the first point to close  ·  Double-click, Enter or Esc to finish  ·  Type a number for an exact length');

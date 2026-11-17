@@ -16,6 +16,7 @@ import { LIBRARY, lineD, pathBBox, smoothD, type PathShape } from './library';
 import { pathSvg, shapeSvg } from './shapes';
 import { pieceSvg, splitPieces, type Line, type Piece, type UngroupDepth } from './ungroup';
 import { nearestShown, trim, type TrimHit, type TrimLine } from './trim';
+import { fillArea, loopsD } from './fillarea';
 import { zip } from './zip';
 import { nest, spinQ, type NestItem } from './nest';
 import { boxPanels, outsideSize } from './boxmaker';
@@ -98,6 +99,7 @@ const ws = new Workspace($<HTMLCanvasElement>('ws'), {
   onMenu: (at) => openMenu(at),
   trimAt: (mx, my, tol) => trimPlan(mx, my, tol)?.removed ?? null,
   onTrim: (mx, my, tol) => trimClick(mx, my, tol),
+  onFill: (mx, my) => fillClick(mx, my),
 });
 if (import.meta.env.DEV) Object.assign(window, { __ws: ws }); // browser tests find the bed on screen
 
@@ -785,11 +787,13 @@ $('toolSelect').onclick = () => setTool('select');
 $('toolLine').onclick = () => setTool('line');
 $('toolCurve').onclick = () => setTool('curve');
 $('toolTrim').onclick = () => setTool('trim');
+$('toolFill').onclick = () => setTool('fill');
 
 function setTool(t: Tool): void {
   ws.setTool(t);
-  for (const [id, name] of [['toolSelect', 'select'], ['toolLine', 'line'], ['toolCurve', 'curve'], ['toolTrim', 'trim']] as const) $(id).classList.toggle('on', name === t);
+  for (const [id, name] of [['toolSelect', 'select'], ['toolLine', 'line'], ['toolCurve', 'curve'], ['toolTrim', 'trim'], ['toolFill', 'fill']] as const) $(id).classList.toggle('on', name === t);
   if (t === 'trim') hint.textContent = 'Trim: click a line to cut away the bit between the lines that cross it. A line nothing crosses goes completely. Esc stops.';
+  if (t === 'fill') hint.textContent = 'Fill area: click inside a space that lines close in (even lines that only touch). It becomes a new Engrave shape. Esc stops.';
   if (t === 'line') hint.textContent = 'Line: click two points, or drag. Hold Shift for straight and 45° lines. Esc cancels.';
   if (t === 'curve') hint.textContent = 'Curve: click points along the curve. Click the first point to close it, or double-click / press Enter to finish. Esc cancels.';
 }
@@ -1054,6 +1058,43 @@ function trimClick(mx: number, my: number, tol: number): void {
   bakeLines(p, keep, '(trimmed)');
   changed({ exact: true });
   cacheBaked(p);
+}
+
+// ---------- fill area ----------
+
+/** Fill area (Dalton 2026-11-17): the space around the click that the lines on the bed close in (lines of
+ *  every part, even ones that only touch) becomes a new closed Engrave part. The lines stay as they were. */
+function fillClick(mx: number, my: number): void {
+  if (staleView()) return warn('Wait a moment for the laser lines to catch up, then click again.');
+  const paths: [number, number][][] = [];
+  for (const p of parts) {
+    const v = viewOf(p);
+    if (!v.box) continue;
+    for (const l of v.layers) for (const path of l.paths) paths.push(path);
+    for (const path of v.unassigned ?? []) paths.push(path);
+  }
+  if (!paths.length) {
+    return warn(getPhrase() || !parts.length ? 'Fill area fills a space that lines close in. Draw or import some lines first.' : 'Fill area works on the laser lines. Enter the class phrase first.');
+  }
+  const r = fillArea(paths, [mx, my]);
+  if ('error' in r) {
+    return warn(r.error === 'line'
+      ? 'Click inside a space, not on a line.'
+      : r.error === 'open'
+        ? 'That space is not closed in: the fill would leak out through a gap. Close the gap (the Line tool), then click again.'
+        : 'Fill area fills a space that lines close in. Draw or import some lines first.');
+  }
+  if (parts.length >= MAX_PARTS) return warn(`That's the most parts one design can have (${MAX_PARTS}).`);
+  const d = loopsD(r.loops);
+  const vb = pathBBox(d);
+  const p: DesignPart = {
+    id: nextId++, source: { kind: 'path', name: 'Filled area', d, vb, closed: true, wMm: vb.w, hMm: vb.h, op: 'engrave' },
+    xMm: round(vb.x + vb.w), yMm: round(vb.y), scale: 1, rotateDeg: 0,
+  };
+  parts.push(p);
+  select(p.id);
+  changed({ exact: true }); // the other parts' lines did not change, so the next click need not wait for the server
+  warn(`Filled ${round(r.areaMm2 / 100, 1)} cm² as Engrave (blue). Click another space, or Esc to stop.`, '🪣');
 }
 
 /** Turn a part into a plain drawing of `lines` (bed mm), in place. It keeps its id (so its selection and

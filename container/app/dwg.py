@@ -52,6 +52,35 @@ def _command(src: Path, out: Path) -> list[str]:
     return [PRLIMIT, f"--as={MEMORY_LIMIT_BYTES}", "--cpu=30", "--", *cmd] if PRLIMIT else cmd
 
 
+def _is_code(line: bytes) -> bool:
+    s = line.strip()
+    return s.isdigit() and int(s) <= 1071  # DXF group codes run 0..1071
+
+
+def mend_text_breaks(dxf: bytes) -> bytes:
+    """dwg2dxf writes a line break inside a text value as a real line break (multi-line MTEXT such as
+    "MYSTERY / CARD", Dalton 2026-11-17), so every line after it is off by one and no DXF reader can open
+    the file. A DXF is pairs of lines: a group code, then its value. Where a text value (codes 1 and 3) is
+    followed by something that cannot start the next pairs, that line is part of the text: it is joined
+    back on with a space. Everything else is copied unchanged."""
+    lines = dxf.split(b"\n")
+    out: list[bytes] = []
+    fixed = 0
+    i = 0
+    while i + 1 < len(lines):
+        code, value = lines[i], lines[i + 1]
+        i += 2
+        if code.strip() in (b"1", b"3"):
+            # the next three pairs must start with group codes, or the line belongs to this text
+            while i < len(lines) - 1 and not all(_is_code(lines[j]) for j in range(i, min(i + 6, len(lines) - 1), 2)):
+                value = value.rstrip(b"\r") + b" " + lines[i].strip() + (b"\r" if value.endswith(b"\r") else b"")
+                i += 1
+                fixed += 1
+        out += [code, value]
+    out += lines[i:]
+    return b"\n".join(out) if fixed else dxf
+
+
 def convert(req: DwgRequest) -> DwgResponse:
     if DWG2DXF is None:
         return DwgResponse(error="DWG files cannot be opened here yet. " + SAVE_AS)
@@ -82,6 +111,6 @@ def convert(req: DwgRequest) -> DwgResponse:
             dxf = out.read_bytes()
             if b"EOF" not in dxf[-64:]:
                 return DwgResponse(error="That DWG only partly converted. " + SAVE_AS)
-            return DwgResponse(dxf_b64=base64.b64encode(dxf).decode())
+            return DwgResponse(dxf_b64=base64.b64encode(mend_text_breaks(dxf)).decode())
     finally:
         _one.release()
